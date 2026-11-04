@@ -534,25 +534,25 @@ class _Properties extends StatelessWidget {
             const FieldLabel('Change image'),
             _EmojiStrip(selected: element.imageBytes == null ? element.emoji : null, onTap: cubit.addEmoji),
           ],
-          if (element.kind != ElementKind.text) ...[
-            const FieldLabel('Size'),
-            Slider(
+          if (element.kind != ElementKind.text)
+            _ValueSlider(
+              label: 'Size',
               min: 8,
               max: 90,
               value: element.w.clamp(8.0, 90.0).toDouble(),
-              onChangeStart: (_) => cubit.beginLive(),
+              onChangeStart: cubit.beginLive,
               onChanged: cubit.setWidth,
-              onChangeEnd: (_) => cubit.endLive(),
+              onChangeEnd: cubit.endLive,
             ),
-          ],
-          const FieldLabel('Rotate'),
-          Slider(
+          _ValueSlider(
+            label: 'Rotate',
             min: -180,
             max: 180,
             value: element.rotation.clamp(-180.0, 180.0).toDouble(),
-            onChangeStart: (_) => cubit.beginLive(),
+            suffix: '°',
+            onChangeStart: cubit.beginLive,
             onChanged: cubit.setRotation,
-            onChangeEnd: (_) => cubit.endLive(),
+            onChangeEnd: cubit.endLive,
           ),
         ],
       ),
@@ -810,6 +810,84 @@ class _FontMenu extends StatelessWidget {
           },
         ),
       ),
+    );
+  }
+}
+
+class _ValueSlider extends StatefulWidget {
+  const _ValueSlider({
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.onChangeStart,
+    required this.onChanged,
+    required this.onChangeEnd,
+    this.suffix = '',
+  });
+
+  final String label;
+  final double value;
+  final double min;
+  final double max;
+  final VoidCallback onChangeStart;
+  final ValueChanged<double> onChanged;
+  final VoidCallback onChangeEnd;
+  final String suffix;
+
+  @override
+  State<_ValueSlider> createState() => _ValueSliderState();
+}
+
+class _ValueSliderState extends State<_ValueSlider> {
+  late double _value = widget.value;
+  bool _dragging = false;
+
+  @override
+  void didUpdateWidget(_ValueSlider oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_dragging && widget.value != _value) _value = widget.value;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FieldLabel(widget.label),
+        Row(
+          children: [
+            Expanded(
+              child: Slider(
+                min: widget.min,
+                max: widget.max,
+                value: _value.clamp(widget.min, widget.max).toDouble(),
+                onChangeStart: (_) {
+                  _dragging = true;
+                  widget.onChangeStart();
+                },
+                onChanged: (value) {
+                  setState(() => _value = value);
+                  widget.onChanged(value);
+                },
+                onChangeEnd: (_) {
+                  _dragging = false;
+                  widget.onChangeEnd();
+                },
+              ),
+            ),
+            SizedBox(
+              width: 52,
+              child: Text(
+                '${_value.round()}${widget.suffix}',
+                textAlign: TextAlign.right,
+                style: poppins(colors, size: 13, weight: FontWeight.w600, height: 1.2),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
