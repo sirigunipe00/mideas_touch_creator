@@ -520,28 +520,81 @@ class ViewSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     return BlocBuilder<CreatorCubit, CreatorState>(
       buildWhen: (previous, current) => previous.view != current.view || previous.designs.length != current.designs.length,
       builder: (context, state) {
-        final index = state.view == StudioView.create
-            ? 0
-            : state.view == StudioView.mine
-                ? 1
-                : -1;
-        return SegmentedControl(
-          margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          labels: ['Create', 'My designs (${state.designs.length})'],
-          index: index,
-          onChanged: (value) {
-            final cubit = context.read<CreatorCubit>();
-            if (value == 0) {
-              cubit.newDesign();
-            } else {
-              cubit.openMine();
-            }
-          },
+        final cubit = context.read<CreatorCubit>();
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.card,
+            border: Border(top: BorderSide(color: colors.line)),
+          ),
+          child: Row(
+            children: [
+              _NavItem(
+                icon: '✎',
+                label: 'Create',
+                selected: state.view == StudioView.create,
+                onTap: cubit.newDesign,
+              ),
+              _NavItem(
+                icon: '▦',
+                label: 'My designs (${state.designs.length})',
+                selected: state.view == StudioView.mine,
+                onTap: cubit.openMine,
+              ),
+            ],
+          ),
         );
       },
+    );
+  }
+}
+
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final color = selected ? colors.primaryText : colors.muted;
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: selected ? colors.primary : Colors.transparent,
+            border: Border(top: BorderSide(color: selected ? colors.primary : Colors.transparent, width: 2)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(icon, style: TextStyle(fontSize: 16, height: 1, color: color)),
+                const SizedBox(height: 3),
+                Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  style: poppins(colors, size: 12, weight: selected ? FontWeight.w600 : FontWeight.w400, color: color, height: 1.1),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

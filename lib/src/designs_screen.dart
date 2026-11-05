@@ -19,9 +19,9 @@ class MyDesignsScreen extends StatelessWidget {
         child: Column(
           children: [
             StudioHeader(),
-            ViewSwitch(),
             FilterSwitch(),
             Expanded(child: _DesignList()),
+            ViewSwitch(),
           ],
         ),
       ),
@@ -105,17 +105,17 @@ class _DesignList extends StatelessWidget {
                           runSpacing: 8,
                           children: [
                             AppButton(label: 'Edit', ghost: true, small: true, onPressed: () => cubit.editDesign(design.id)),
-                            AppButton(
-                              label: state.publishing && !published ? 'Publishing...' : published ? 'Unpublish' : 'Publish',
-                              small: true,
-                              onPressed: state.publishing ? null : () => publishListedDesign(context, design, published),
-                            ),
-                            AppButton(
-                              label: 'Delete',
-                              danger: true,
-                              small: true,
-                              onPressed: () => cubit.deleteDesign(design.id),
-                            ),
+                            // AppButton(
+                            //   label: state.publishing && !published ? 'Publishing...' : published ? 'Unpublish' : 'Publish',
+                            //   small: true,
+                            //   onPressed: state.publishing ? null : () => publishListedDesign(context, design, published),
+                            // ),
+                            // AppButton(
+                            //   label: 'Delete',
+                            //   danger: true,
+                            //   small: true,
+                            //   onPressed: () => cubit.deleteDesign(design.id),
+                            // ),
                           ],
                         ),
                       ],
@@ -143,7 +143,6 @@ class PublishedScreen extends StatelessWidget {
         child: Column(
           children: [
             const StudioHeader(),
-            const ViewSwitch(),
             Expanded(
               child: BlocBuilder<CreatorCubit, CreatorState>(
                 buildWhen: (previous, current) => previous.publishedDesign != current.publishedDesign,
@@ -190,6 +189,7 @@ class PublishedScreen extends StatelessWidget {
                 },
               ),
             ),
+            const ViewSwitch(),
           ],
         ),
       ),

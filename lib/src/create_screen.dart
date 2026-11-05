@@ -33,7 +33,6 @@ class _CreateScreenState extends State<CreateScreen> {
         child: Column(
           children: [
             const StudioHeader(),
-            const ViewSwitch(),
             const _FrozenCanvas(),
             Expanded(
               child: ListView(
@@ -46,6 +45,7 @@ class _CreateScreenState extends State<CreateScreen> {
                 ],
               ),
             ),
+            const ViewSwitch(),
           ],
         ),
       ),

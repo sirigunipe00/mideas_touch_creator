@@ -50,7 +50,7 @@ class _StudioScreenState extends State<StudioScreen> {
           Positioned(
             left: 16,
             right: 16,
-            bottom: 84,
+            bottom: 112,
             child: IgnorePointer(
               child: AnimatedOpacity(
                 opacity: _show ? 1 : 0,
