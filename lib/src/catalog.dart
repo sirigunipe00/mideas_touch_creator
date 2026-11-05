@@ -24,16 +24,6 @@ class Catalog {
     'Other',
   ];
 
-  static const fonts = [
-    'Poppins',
-    'Playfair Display',
-    'Pacifico',
-    'Bebas Neue',
-    'Noto Sans Devanagari',
-    'Hind',
-    'Baloo 2',
-  ];
-
   static const stickers = [
     Sticker('🪔', 'diya diwali lamp'),
     Sticker('🍔', 'burger food'),

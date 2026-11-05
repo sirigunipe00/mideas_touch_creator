@@ -201,6 +201,7 @@ class Design {
     this.backgroundImage,
     this.status = '',
     this.savedAt = '',
+    this.remoteId,
   });
 
   final int id;
@@ -213,6 +214,7 @@ class Design {
   final List<DesignElement> elements;
   final String status;
   final String savedAt;
+  final int? remoteId;
 
   List<int> get textIndexes => [
         for (var i = 0; i < elements.length; i++)
@@ -239,6 +241,8 @@ class Design {
     List<DesignElement>? elements,
     String? status,
     String? savedAt,
+    int? remoteId,
+    bool clearRemote = false,
   }) {
     return Design(
       id: id ?? this.id,
@@ -251,6 +255,7 @@ class Design {
       elements: elements ?? this.elements,
       status: status ?? this.status,
       savedAt: savedAt ?? this.savedAt,
+      remoteId: clearRemote ? null : (remoteId ?? this.remoteId),
     );
   }
 }

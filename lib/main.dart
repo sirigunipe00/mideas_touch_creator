@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:mideas_touch_creator/src/creator_cubit.dart';
+import 'package:mideas_touch_creator/src/poster_capture.dart';
 import 'package:mideas_touch_creator/src/studio_screen.dart';
 import 'package:mideas_touch_creator/src/theme.dart';
 
@@ -38,7 +39,13 @@ class CreatorApp extends StatelessWidget {
                   child: AppPalette(
                     colors: dark ? AppColors.dark : AppColors.light,
                     isDark: dark,
-                    child: PhoneFrame(child: child ?? const SizedBox.shrink()),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        PhoneFrame(child: child ?? const SizedBox.shrink()),
+                        const PosterExportHost(),
+                      ],
+                    ),
                   ),
                 ),
               );

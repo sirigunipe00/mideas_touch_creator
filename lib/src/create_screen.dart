@@ -5,6 +5,7 @@ import 'package:mideas_touch_creator/src/catalog.dart';
 import 'package:mideas_touch_creator/src/creator_cubit.dart';
 import 'package:mideas_touch_creator/src/models.dart';
 import 'package:mideas_touch_creator/src/poster.dart';
+import 'package:mideas_touch_creator/src/poster_capture.dart';
 import 'package:mideas_touch_creator/src/theme.dart';
 import 'package:mideas_touch_creator/src/ui.dart';
 
@@ -33,13 +34,12 @@ class _CreateScreenState extends State<CreateScreen> {
           children: [
             const StudioHeader(),
             const ViewSwitch(),
+            const _FrozenCanvas(),
             Expanded(
               child: ListView(
                 controller: _scroll,
                 padding: const EdgeInsets.only(bottom: 20),
                 children: const [
-                  PosterSection(),
-                  UndoSection(),
                   ToolSection(),
                   PanelSection(),
                   DetailsSection(),
@@ -53,8 +53,87 @@ class _CreateScreenState extends State<CreateScreen> {
   }
 }
 
+class _FrozenCanvas extends StatefulWidget {
+  const _FrozenCanvas();
+
+  @override
+  State<_FrozenCanvas> createState() => _FrozenCanvasState();
+}
+
+class _FrozenCanvasState extends State<_FrozenCanvas> {
+  static const _minZoom = 0.5;
+  static const _maxZoom = 3.0;
+  double _zoom = 1;
+  Offset _offset = Offset.zero;
+  double _boxWidth = 0;
+
+  void _onPinch(double scaleDelta, Offset panDelta) {
+    setState(() {
+      _zoom = (_zoom * scaleDelta).clamp(_minZoom, _maxZoom);
+      _offset += panDelta;
+      _clampOffset();
+    });
+  }
+
+  void _stepZoom(double delta) {
+    setState(() {
+      _zoom = (_zoom + delta).clamp(_minZoom, _maxZoom);
+      _clampOffset();
+    });
+  }
+
+  void _resetZoom() {
+    setState(() {
+      _zoom = 1;
+      _offset = Offset.zero;
+    });
+  }
+
+  void _clampOffset() {
+    if (_zoom <= 1 || _boxWidth <= 0) {
+      _offset = Offset.zero;
+      return;
+    }
+    final limit = _boxWidth * (_zoom - 1) / 2;
+    _offset = Offset(_offset.dx.clamp(-limit, limit), _offset.dy.clamp(-limit, limit));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        PosterSection(
+          zoom: _zoom,
+          offset: _offset,
+          onPinch: _onPinch,
+          onMeasured: (width) => _boxWidth = width,
+        ),
+        UndoSection(
+          zoom: _zoom,
+          canZoomOut: _zoom > _minZoom,
+          canZoomIn: _zoom < _maxZoom,
+          onZoomOut: () => _stepZoom(-0.25),
+          onZoomIn: () => _stepZoom(0.25),
+          onZoomReset: _resetZoom,
+        ),
+      ],
+    );
+  }
+}
+
 class PosterSection extends StatelessWidget {
-  const PosterSection({super.key});
+  const PosterSection({
+    required this.zoom,
+    required this.offset,
+    required this.onPinch,
+    required this.onMeasured,
+    super.key,
+  });
+
+  final double zoom;
+  final Offset offset;
+  final void Function(double scaleDelta, Offset panDelta) onPinch;
+  final ValueChanged<double> onMeasured;
 
   @override
   Widget build(BuildContext context) {
@@ -72,20 +151,32 @@ class PosterSection extends StatelessWidget {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final width = (constraints.maxWidth - 32) * 0.76;
+              onMeasured(width);
               return Center(
                 child: SizedBox(
                   width: width,
+                  height: width,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(6),
                       boxShadow: [context.colors.shadow],
                     ),
-                    child: PosterView(
-                      design: design,
-                      selected: state.selected,
-                      interactive: true,
-                      showGuide: state.showGuide,
-                      removing: state.removingBackground,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: Transform.translate(
+                        offset: offset,
+                        child: Transform.scale(
+                          scale: zoom,
+                          child: PosterView(
+                            design: design,
+                            selected: state.selected,
+                            interactive: true,
+                            showGuide: state.showGuide,
+                            removing: state.removingBackground,
+                            onPinch: onPinch,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -99,7 +190,22 @@ class PosterSection extends StatelessWidget {
 }
 
 class UndoSection extends StatelessWidget {
-  const UndoSection({super.key});
+  const UndoSection({
+    required this.zoom,
+    required this.canZoomOut,
+    required this.canZoomIn,
+    required this.onZoomOut,
+    required this.onZoomIn,
+    required this.onZoomReset,
+    super.key,
+  });
+
+  final double zoom;
+  final bool canZoomOut;
+  final bool canZoomIn;
+  final VoidCallback onZoomOut;
+  final VoidCallback onZoomIn;
+  final VoidCallback onZoomReset;
 
   @override
   Widget build(BuildContext context) {
@@ -133,6 +239,28 @@ class UndoSection extends StatelessWidget {
                     dimmed: !state.canRedo,
                     onTap: cubit.redo,
                     child: Text('↷', style: poppins(colors, size: 18, height: 1)),
+                  ),
+                  const SizedBox(width: 18),
+                  SquareButton(
+                    dimmed: !canZoomOut,
+                    onTap: canZoomOut ? onZoomOut : null,
+                    child: Text('−', style: poppins(colors, size: 18, height: 1)),
+                  ),
+                  GestureDetector(
+                    onTap: onZoomReset,
+                    child: SizedBox(
+                      width: 52,
+                      child: Text(
+                        '${(zoom * 100).round()}%',
+                        textAlign: TextAlign.center,
+                        style: poppins(colors, size: 12, weight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                  SquareButton(
+                    dimmed: !canZoomIn,
+                    onTap: canZoomIn ? onZoomIn : null,
+                    child: Text('+', style: poppins(colors, size: 18, height: 1)),
                   ),
                 ],
               ),
@@ -520,13 +648,15 @@ class _Properties extends StatelessWidget {
             ),
           ],
           if (element.kind == ElementKind.image) ...[
-            const SizedBox(height: 10),
-            AppButton(
-              label: element.photo ? '✂ Remove Background' : '✓ Background removed',
-              ghost: true,
-              expand: true,
-              onPressed: element.photo ? cubit.removeBackground : null,
-            ),
+            if (element.imageBytes == null) ...[
+              const SizedBox(height: 10),
+              AppButton(
+                label: element.photo ? '✂ Remove Background' : '✓ Background removed',
+                ghost: true,
+                expand: true,
+                onPressed: element.photo ? cubit.removeBackground : null,
+              ),
+            ],
             UploadButton(
               label: '⬆ Replace from gallery',
               onTap: () => cubit.pickImage(ImageSlot.selectedOrNew),
@@ -566,7 +696,8 @@ class DetailsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<CreatorCubit, CreatorState>(
-      buildWhen: (previous, current) => previous.formTick != current.formTick,
+      buildWhen: (previous, current) =>
+          previous.formTick != current.formTick || previous.publishing != current.publishing,
       builder: (context, state) {
         final design = state.current;
         if (design == null) return const SizedBox.shrink();
@@ -635,8 +766,12 @@ class DetailsSection extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: AppButton(
-                      label: state.updatingPublished ? 'Update' : 'Publish',
-                      onPressed: cubit.publish,
+                      label: state.publishing
+                          ? 'Publishing...'
+                          : state.updatingPublished
+                              ? 'Update'
+                              : 'Publish',
+                      onPressed: state.publishing ? null : () => publishCurrentDesign(context),
                     ),
                   ),
                 ],
@@ -783,32 +918,118 @@ class _FontMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final fonts = Catalog.fonts.contains(font) ? Catalog.fonts : [font, ...Catalog.fonts];
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: BoxDecoration(
-        color: colors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.line),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: font,
-          isExpanded: true,
-          isDense: true,
-          dropdownColor: colors.card,
-          style: poppins(colors),
-          items: [
-            for (final name in fonts)
-              DropdownMenuItem(
-                value: name,
-                child: Text(name, style: GoogleFonts.getFont(name, fontSize: 14, color: colors.text)),
-              ),
-          ],
-          onChanged: (value) {
-            if (value != null) context.read<CreatorCubit>().setFont(value);
-          },
+    return GestureDetector(
+      onTap: () async {
+        final picked = await showModalBottomSheet<String>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: colors.card,
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+          builder: (context) => _FontPicker(selected: font),
+        );
+        if (picked != null && context.mounted) context.read<CreatorCubit>().setFont(picked);
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: colors.card,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: colors.line),
         ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(font, style: GoogleFonts.getFont(font, fontSize: 16, color: colors.text)),
+            ),
+            Text('⌄', style: poppins(colors, size: 16, color: colors.muted)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FontPicker extends StatefulWidget {
+  const _FontPicker({required this.selected});
+
+  final String selected;
+
+  @override
+  State<_FontPicker> createState() => _FontPickerState();
+}
+
+class _FontPickerState extends State<_FontPicker> {
+  static final List<String> _all = GoogleFonts.asMap().keys.toList(growable: false);
+  final TextEditingController _query = TextEditingController();
+  String _filter = '';
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  List<String> get _visible {
+    final query = _filter.trim().toLowerCase();
+    if (query.isEmpty) return _all;
+    return [for (final name in _all) if (name.toLowerCase().contains(query)) name];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final fonts = _visible;
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.72,
+      child: Column(
+        children: [
+          const SizedBox(height: 8),
+          Container(
+            width: 42,
+            height: 4,
+            decoration: BoxDecoration(color: colors.line, borderRadius: BorderRadius.circular(4)),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: TextField(
+              controller: _query,
+              autofocus: true,
+              style: poppins(colors),
+              decoration: InputDecoration(
+                hintText: 'Search all fonts',
+                hintStyle: poppins(colors, color: colors.muted),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: colors.line),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: colors.primary, width: 1.4),
+                ),
+              ),
+              onChanged: (value) => setState(() => _filter = value),
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: fonts.length,
+              itemBuilder: (context, index) {
+                final name = fonts[index];
+                final selected = name == widget.selected;
+                return ListTile(
+                  dense: true,
+                  selected: selected,
+                  title: Text(name, style: GoogleFonts.getFont(name, fontSize: 18, color: colors.text)),
+                  trailing: selected ? Text('✓', style: poppins(colors, weight: FontWeight.w700, color: colors.primary)) : null,
+                  onTap: () => Navigator.pop(context, name),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -29,6 +29,7 @@ class PosterView extends StatefulWidget {
     this.interactive = false,
     this.showGuide = false,
     this.removing = false,
+    this.onPinch,
     super.key,
   });
 
@@ -37,6 +38,7 @@ class PosterView extends StatefulWidget {
   final bool interactive;
   final bool showGuide;
   final bool removing;
+  final void Function(double scaleDelta, Offset panDelta)? onPinch;
 
   @override
   State<PosterView> createState() => _PosterViewState();
@@ -94,7 +96,7 @@ class _PosterViewState extends State<PosterView> {
         behavior: HitTestBehavior.opaque,
         gestures: <Type, GestureRecognizerFactory>{
           _PosterPanRecognizer: GestureRecognizerFactoryWithHandlers<_PosterPanRecognizer>(
-            () => _PosterPanRecognizer(onDown: _down, onMove: _move, onUp: _up),
+            () => _PosterPanRecognizer(onDown: _down, onMove: _move, onUp: _up, onPinch: _pinch),
             (_) {},
           ),
         },
@@ -231,6 +233,10 @@ class _PosterViewState extends State<PosterView> {
     }
     _moved = true;
     context.read<CreatorCubit>().previewElement(index, next, guide: guide);
+  }
+
+  void _pinch(double scaleDelta, Offset panDelta) {
+    widget.onPinch?.call(scaleDelta, panDelta);
   }
 
   void _up(PointerEvent event) {
@@ -460,26 +466,73 @@ class _BackgroundPainter extends CustomPainter {
 }
 
 class _PosterPanRecognizer extends OneSequenceGestureRecognizer {
-  _PosterPanRecognizer({required this.onDown, required this.onMove, required this.onUp});
+  _PosterPanRecognizer({
+    required this.onDown,
+    required this.onMove,
+    required this.onUp,
+    required this.onPinch,
+  });
 
   final void Function(PointerDownEvent event) onDown;
   final void Function(PointerMoveEvent event) onMove;
   final void Function(PointerEvent event) onUp;
+  final void Function(double scaleDelta, Offset panDelta) onPinch;
+
+  final Map<int, Offset> _points = {};
+  double? _span;
+  Offset? _focal;
 
   @override
   void addAllowedPointer(PointerDownEvent event) {
     super.addAllowedPointer(event);
-    resolve(GestureDisposition.accepted);
-    onDown(event);
+    _points[event.pointer] = event.position;
+    if (_points.length == 1) {
+      resolve(GestureDisposition.accepted);
+      onDown(event);
+      return;
+    }
+    _span = _spread();
+    _focal = _center();
   }
 
   @override
   void handleEvent(PointerEvent event) {
-    if (event is PointerMoveEvent) onMove(event);
+    if (event is PointerMoveEvent) {
+      _points[event.pointer] = event.position;
+      if (_points.length >= 2) {
+        final span = _spread();
+        final focal = _center();
+        final previousSpan = _span ?? span;
+        final previousFocal = _focal ?? focal;
+        _span = span;
+        _focal = focal;
+        final scaleDelta = previousSpan == 0 ? 1.0 : span / previousSpan;
+        onPinch(scaleDelta, focal - previousFocal);
+        return;
+      }
+      onMove(event);
+    }
     if (event is PointerUpEvent || event is PointerCancelEvent) {
-      onUp(event);
+      _points.remove(event.pointer);
+      _span = _points.length >= 2 ? _spread() : null;
+      _focal = _points.length >= 2 ? _center() : null;
+      if (_points.isEmpty) onUp(event);
       stopTrackingPointer(event.pointer);
     }
+  }
+
+  double _spread() {
+    final points = _points.values.toList();
+    if (points.length < 2) return 0;
+    return (points[0] - points[1]).distance;
+  }
+
+  Offset _center() {
+    var sum = Offset.zero;
+    for (final point in _points.values) {
+      sum += point;
+    }
+    return sum / _points.length.toDouble();
   }
 
   @override

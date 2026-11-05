@@ -8,6 +8,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mideas_touch_creator/src/catalog.dart';
 import 'package:mideas_touch_creator/src/models.dart';
+import 'package:mideas_touch_creator/src/template_repository.dart';
 
 class CreatorState {
   const CreatorState({
@@ -36,6 +37,7 @@ class CreatorState {
     required this.formTick,
     required this.toastMessage,
     required this.toastTick,
+    required this.publishing,
   });
 
   factory CreatorState.initial() {
@@ -65,6 +67,7 @@ class CreatorState {
       formTick: 0,
       toastMessage: null,
       toastTick: 0,
+      publishing: false,
     );
   }
 
@@ -93,6 +96,7 @@ class CreatorState {
   final int formTick;
   final String? toastMessage;
   final int toastTick;
+  final bool publishing;
 
   bool get canUndo => history.isNotEmpty;
   bool get canRedo => future.isNotEmpty;
@@ -147,6 +151,7 @@ class CreatorState {
     int? formTick,
     String? toastMessage,
     int? toastTick,
+    bool? publishing,
   }) {
     return CreatorState(
       splash: splash ?? this.splash,
@@ -174,13 +179,17 @@ class CreatorState {
       formTick: formTick ?? this.formTick,
       toastMessage: toastMessage ?? this.toastMessage,
       toastTick: toastTick ?? this.toastTick,
+      publishing: publishing ?? this.publishing,
     );
   }
 }
 
 class CreatorCubit extends Cubit<CreatorState> {
-  CreatorCubit() : super(CreatorState.initial());
+  CreatorCubit({TemplateRepository? templates})
+      : _templates = templates ?? SupabaseTemplateRepository(),
+        super(CreatorState.initial());
 
+  final TemplateRepository _templates;
   final ImagePicker _picker = ImagePicker();
   bool _live = false;
   Timer? _liveTimer;
@@ -507,7 +516,7 @@ class CreatorCubit extends Cubit<CreatorState> {
         selected >= 0 &&
         selected < current.elements.length &&
         current.elements[selected].kind == ElementKind.image) {
-      _updateSelected((element) => element.copyWith(emoji: emoji, imageBytes: null));
+      _updateSelected((element) => element.copyWith(emoji: emoji, imageBytes: null, photo: true));
       return;
     }
     _add(DesignElement.image(x: 35, y: 35, w: 30, emoji: emoji));
@@ -522,6 +531,7 @@ class CreatorCubit extends Cubit<CreatorState> {
     elements[imageIndex] = elements[imageIndex].copyWith(
       emoji: Catalog.stickers[index].emoji,
       imageBytes: null,
+      photo: true,
     );
     emit(state.copyWith(
       current: current.copyWith(elements: elements),
@@ -622,7 +632,7 @@ class CreatorCubit extends Cubit<CreatorState> {
     final index = state.selected;
     if (current == null || index < 0 || index >= current.elements.length) return;
     final element = current.elements[index];
-    if (element.kind != ElementKind.image || !element.photo) return;
+    if (element.kind != ElementKind.image || !element.photo || element.imageBytes != null) return;
     final token = ++_removeToken;
     emit(state.copyWith(
       history: [...state.history, _snap(current)],
@@ -654,18 +664,84 @@ class CreatorCubit extends Cubit<CreatorState> {
 
   void saveDraft() => _save(DesignStatus.draft);
 
-  void publish() => _save(DesignStatus.published);
+  Future<void> publish({Uint8List? poster}) async {
+    final current = state.current;
+    if (current == null || state.publishing) return;
+    if (current.name.trim().isEmpty) {
+      toast('Add a design name to publish');
+      return;
+    }
+    if (poster == null || poster.isEmpty) {
+      toast('Could not create the design image');
+      return;
+    }
+    emit(state.copyWith(publishing: true));
+    try {
+      final remoteId = await _templates.publish(
+        current,
+        authorName: state.user?.name ?? 'Creator',
+        poster: poster,
+      );
+      if (isClosed) return;
+      _save(DesignStatus.published, remoteId: remoteId);
+    } on TemplatePublishException catch (error, stackTrace) {
+      debugPrint('Publish failed: $error\n$stackTrace');
+      if (isClosed) return;
+      emit(state.copyWith(publishing: false));
+      toast(error.message);
+    } catch (error, stackTrace) {
+      debugPrint('Publish failed: $error\n$stackTrace');
+      if (isClosed) return;
+      emit(state.copyWith(publishing: false));
+      toast('Could not publish the design');
+    }
+  }
 
-  void togglePublished(int id) {
+  Future<void> togglePublished(int id, {Uint8List? poster}) async {
+    if (state.publishing) return;
     final designs = [...state.designs];
     final index = designs.indexWhere((design) => design.id == id);
     if (index < 0) return;
-    final published = designs[index].status != DesignStatus.published;
-    designs[index] = designs[index].copyWith(
-      status: published ? DesignStatus.published : DesignStatus.draft,
-    );
-    emit(state.copyWith(designs: designs, formTick: state.formTick + 1));
-    toast(published ? 'Design published' : 'Moved to drafts');
+    final design = designs[index];
+    if (design.status == DesignStatus.published) {
+      designs[index] = design.copyWith(status: DesignStatus.draft);
+      emit(state.copyWith(designs: designs, formTick: state.formTick + 1));
+      toast('Moved to drafts');
+      return;
+    }
+    if (poster == null || poster.isEmpty) {
+      toast('Could not create the design image');
+      return;
+    }
+    emit(state.copyWith(publishing: true));
+    try {
+      final remoteId = await _templates.publish(
+        design,
+        authorName: state.user?.name ?? 'Creator',
+        poster: poster,
+      );
+      if (isClosed) return;
+      final next = [...state.designs];
+      final nextIndex = next.indexWhere((item) => item.id == id);
+      if (nextIndex >= 0) {
+        next[nextIndex] = next[nextIndex].copyWith(
+          status: DesignStatus.published,
+          remoteId: remoteId,
+        );
+      }
+      emit(state.copyWith(designs: next, publishing: false, formTick: state.formTick + 1));
+      toast('Design published');
+    } on TemplatePublishException catch (error, stackTrace) {
+      debugPrint('Publish failed: $error\n$stackTrace');
+      if (isClosed) return;
+      emit(state.copyWith(publishing: false));
+      toast(error.message);
+    } catch (error, stackTrace) {
+      debugPrint('Publish failed: $error\n$stackTrace');
+      if (isClosed) return;
+      emit(state.copyWith(publishing: false));
+      toast('Could not publish the design');
+    }
   }
 
   void deleteDesign(int id) {
@@ -683,10 +759,11 @@ class CreatorCubit extends Cubit<CreatorState> {
   @override
   Future<void> close() {
     _cancelAsync();
+    _templates.close();
     return super.close();
   }
 
-  void _save(String status) {
+  void _save(String status, {int? remoteId}) {
     var current = state.current;
     if (current == null) return;
     if (status == DesignStatus.published && current.name.trim().isEmpty) {
@@ -700,6 +777,7 @@ class CreatorCubit extends Cubit<CreatorState> {
       status: status,
       savedAt: _formatDate(DateTime.now()),
       elements: [...current.elements],
+      remoteId: remoteId,
     );
     final designs = [...state.designs];
     final editingId = state.editingId;
@@ -714,10 +792,11 @@ class CreatorCubit extends Cubit<CreatorState> {
     if (status == DesignStatus.published) {
       emit(state.copyWith(
         designs: designs,
-        current: current.copyWith(name: stored.name),
+        current: current.copyWith(name: stored.name, remoteId: stored.remoteId),
         editingId: storedId,
         publishedDesign: stored,
         view: StudioView.published,
+        publishing: false,
         formTick: state.formTick + 1,
       ));
       toast('Design published');
@@ -750,7 +829,7 @@ class CreatorCubit extends Cubit<CreatorState> {
       final index = current.firstImage;
       if (index == null) return;
       final elements = [...current.elements];
-      elements[index] = elements[index].copyWith(imageBytes: bytes, emoji: '');
+      elements[index] = elements[index].copyWith(imageBytes: bytes, emoji: '', photo: false);
       emit(state.copyWith(
         current: current.copyWith(elements: elements),
         history: [...state.history, _snap(current)],
@@ -762,7 +841,7 @@ class CreatorCubit extends Cubit<CreatorState> {
     final selected = state.selected;
     if (selected >= 0 && selected < current.elements.length && current.elements[selected].kind == ElementKind.image) {
       final elements = [...current.elements];
-      elements[selected] = elements[selected].copyWith(imageBytes: bytes, emoji: '');
+      elements[selected] = elements[selected].copyWith(imageBytes: bytes, emoji: '', photo: false);
       emit(state.copyWith(
         current: current.copyWith(elements: elements),
         history: [...state.history, _snap(current)],

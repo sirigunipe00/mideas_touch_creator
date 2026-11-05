@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:mideas_touch_creator/src/creator_cubit.dart';
 import 'package:mideas_touch_creator/src/models.dart';
 import 'package:mideas_touch_creator/src/poster.dart';
+import 'package:mideas_touch_creator/src/poster_capture.dart';
 import 'package:mideas_touch_creator/src/theme.dart';
 import 'package:mideas_touch_creator/src/ui.dart';
 
@@ -34,7 +35,10 @@ class _DesignList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<CreatorCubit, CreatorState>(
-      buildWhen: (previous, current) => previous.designs != current.designs || previous.filter != current.filter,
+      buildWhen: (previous, current) =>
+          previous.designs != current.designs ||
+          previous.filter != current.filter ||
+          previous.publishing != current.publishing,
       builder: (context, state) {
         final designs = state.visibleDesigns;
         if (designs.isEmpty) {
@@ -102,9 +106,9 @@ class _DesignList extends StatelessWidget {
                           children: [
                             AppButton(label: 'Edit', ghost: true, small: true, onPressed: () => cubit.editDesign(design.id)),
                             AppButton(
-                              label: published ? 'Unpublish' : 'Publish',
+                              label: state.publishing && !published ? 'Publishing...' : published ? 'Unpublish' : 'Publish',
                               small: true,
-                              onPressed: () => cubit.togglePublished(design.id),
+                              onPressed: state.publishing ? null : () => publishListedDesign(context, design, published),
                             ),
                             AppButton(
                               label: 'Delete',
