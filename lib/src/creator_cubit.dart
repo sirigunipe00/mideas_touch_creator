@@ -187,7 +187,9 @@ class CreatorState {
 class CreatorCubit extends Cubit<CreatorState> {
   CreatorCubit({TemplateRepository? templates})
       : _templates = templates ?? SupabaseTemplateRepository(),
-        super(CreatorState.initial());
+        super(CreatorState.initial()) {
+    _loadRemoteDesigns();
+  }
 
   final TemplateRepository _templates;
   final ImagePicker _picker = ImagePicker();
@@ -199,6 +201,12 @@ class CreatorCubit extends Cubit<CreatorState> {
   void dismissSplash() {
     if (!state.splash) return;
     emit(state.copyWith(splash: false));
+    // Login/registration is hidden for now — enter as a guest creator.
+    // To re-enable, remove this block; _StudioPage shows LoginScreen when user is null.
+    if (state.user == null) {
+      emit(state.copyWith(user: const StudioUser(name: 'Creator', email: '')));
+      newDesign();
+    }
   }
 
   void toggleTheme({required bool currentlyDark}) {
@@ -286,9 +294,17 @@ class CreatorCubit extends Cubit<CreatorState> {
     ));
   }
 
-  void openMine() => emit(state.copyWith(view: StudioView.mine));
+  void openMine() {
+    emit(state.copyWith(view: StudioView.mine));
+    _loadRemoteDesigns();
+  }
 
-  void setFilter(DesignFilter filter) => emit(state.copyWith(filter: filter));
+  void setFilter(DesignFilter filter) {
+    emit(state.copyWith(filter: filter));
+    if (filter == DesignFilter.published || filter == DesignFilter.all) {
+      _loadPublished();
+    }
+  }
 
   void editDesign(int id) {
     Design? source;
@@ -669,7 +685,122 @@ class CreatorCubit extends Cubit<CreatorState> {
     });
   }
 
-  void saveDraft() => _save(DesignStatus.draft);
+  void saveDraft({Uint8List? poster}) {
+    _save(DesignStatus.draft);
+    final editingId = state.editingId;
+    if (editingId == null) return;
+    for (final design in state.designs) {
+      if (design.id == editingId) {
+        _syncDraft(design, poster);
+        return;
+      }
+    }
+  }
+
+  Future<void> syncDraftPoster(Uint8List poster) async {
+    if (poster.isEmpty) return;
+    final editingId = state.editingId;
+    if (editingId == null) return;
+    for (final design in state.designs) {
+      if (design.id == editingId) {
+        await _syncDraft(design, poster);
+        return;
+      }
+    }
+  }
+
+  Future<void> _syncDraft(Design design, Uint8List? poster) async {
+    try {
+      final draftId = await _templates.saveDraft(
+        design,
+        authorName: state.user?.name ?? 'Creator',
+        poster: poster,
+      );
+      if (isClosed) return;
+      final designs = [...state.designs];
+      final index = designs.indexWhere((item) => item.id == design.id);
+      if (index >= 0) designs[index] = designs[index].copyWith(draftId: draftId);
+      final current = state.current;
+      emit(state.copyWith(
+        designs: designs,
+        current: current != null && current.id == design.id ? current.copyWith(draftId: draftId) : current,
+      ));
+    } catch (error, stackTrace) {
+      debugPrint('Draft sync failed: $error\n$stackTrace');
+      if (isClosed) return;
+      toast('Draft saved on this device — could not sync to the cloud');
+    }
+  }
+
+  Future<void> _loadRemoteDesigns() async {
+    List<Design> drafts = const [];
+    List<Design> published = const [];
+    try {
+      drafts = await _templates.fetchDrafts();
+    } catch (error, stackTrace) {
+      debugPrint('Could not load drafts: $error\n$stackTrace');
+    }
+    try {
+      published = await _templates.fetchPublished();
+    } catch (error, stackTrace) {
+      debugPrint('Could not load published templates: $error\n$stackTrace');
+    }
+    if (isClosed) return;
+    _mergeRemoteDesigns(drafts: drafts, published: published);
+  }
+
+  Future<void> _loadPublished() async {
+    try {
+      final published = await _templates.fetchPublished();
+      if (isClosed) return;
+      _mergeRemoteDesigns(published: published);
+    } catch (error, stackTrace) {
+      debugPrint('Could not load published templates: $error\n$stackTrace');
+    }
+  }
+
+  void _mergeRemoteDesigns({List<Design> drafts = const [], List<Design>? published}) {
+    final designs = [...state.designs];
+
+    for (final draft in drafts) {
+      final index = designs.indexWhere((design) => design.draftId != null && design.draftId == draft.draftId);
+      if (index < 0) {
+        designs.add(draft);
+      } else {
+        designs[index] = draft;
+      }
+    }
+
+    if (published != null) {
+      designs.removeWhere(
+        (design) => design.status == DesignStatus.published && design.remoteId != null,
+      );
+      for (final item in published) {
+        final index = designs.indexWhere((design) => design.remoteId != null && design.remoteId == item.remoteId);
+        if (index < 0) {
+          designs.add(item);
+        } else {
+          designs[index] = item;
+        }
+      }
+    }
+
+    designs.sort((a, b) {
+      final aPublished = a.status == DesignStatus.published;
+      final bPublished = b.status == DesignStatus.published;
+      if (aPublished != bPublished) return aPublished ? -1 : 1;
+      return b.id.compareTo(a.id);
+    });
+    emit(state.copyWith(designs: designs, formTick: state.formTick + 1));
+  }
+
+  Future<void> _deleteRemoteDraft(int draftId) async {
+    try {
+      await _templates.deleteDraft(draftId);
+    } catch (error) {
+      debugPrint('Could not delete the saved draft: $error');
+    }
+  }
 
   Future<void> publish({Uint8List? poster}) async {
     final current = state.current;
@@ -678,19 +809,24 @@ class CreatorCubit extends Cubit<CreatorState> {
       toast('Add a design name to publish');
       return;
     }
-    if (poster == null || poster.isEmpty) {
-      toast('Could not create the design image');
-      return;
-    }
     emit(state.copyWith(publishing: true));
     try {
+      final draftId = current.draftId;
       final remoteId = await _templates.publish(
         current,
         authorName: state.user?.name ?? 'Creator',
         poster: poster,
       );
       if (isClosed) return;
-      _save(DesignStatus.published, remoteId: remoteId);
+      if (draftId != null) _deleteRemoteDraft(draftId);
+      _save(
+        DesignStatus.published,
+        remoteId: remoteId,
+        clearDraft: true,
+        successMessage: poster == null || poster.isEmpty
+            ? 'Design published — preview image could not be created'
+            : null,
+      );
     } on TemplatePublishException catch (error, stackTrace) {
       debugPrint('Publish failed: $error\n$stackTrace');
       if (isClosed) return;
@@ -716,10 +852,6 @@ class CreatorCubit extends Cubit<CreatorState> {
       toast('Moved to drafts');
       return;
     }
-    if (poster == null || poster.isEmpty) {
-      toast('Could not create the design image');
-      return;
-    }
     emit(state.copyWith(publishing: true));
     try {
       final remoteId = await _templates.publish(
@@ -728,16 +860,22 @@ class CreatorCubit extends Cubit<CreatorState> {
         poster: poster,
       );
       if (isClosed) return;
+      if (design.draftId != null) _deleteRemoteDraft(design.draftId!);
       final next = [...state.designs];
       final nextIndex = next.indexWhere((item) => item.id == id);
       if (nextIndex >= 0) {
         next[nextIndex] = next[nextIndex].copyWith(
           status: DesignStatus.published,
           remoteId: remoteId,
+          clearDraft: true,
         );
       }
       emit(state.copyWith(designs: next, publishing: false, formTick: state.formTick + 1));
-      toast('Design published');
+      toast(
+        poster == null || poster.isEmpty
+            ? 'Design published — preview image could not be created'
+            : 'Design published',
+      );
     } on TemplatePublishException catch (error, stackTrace) {
       debugPrint('Publish failed: $error\n$stackTrace');
       if (isClosed) return;
@@ -752,6 +890,11 @@ class CreatorCubit extends Cubit<CreatorState> {
   }
 
   void deleteDesign(int id) {
+    for (final design in state.designs) {
+      if (design.id == id && design.draftId != null) {
+        _deleteRemoteDraft(design.draftId!);
+      }
+    }
     emit(state.copyWith(
       designs: state.designs.where((design) => design.id != id).toList(),
       formTick: state.formTick + 1,
@@ -770,7 +913,7 @@ class CreatorCubit extends Cubit<CreatorState> {
     return super.close();
   }
 
-  void _save(String status, {int? remoteId}) {
+  void _save(String status, {int? remoteId, bool clearDraft = false, String? successMessage}) {
     var current = state.current;
     if (current == null) return;
     if (status == DesignStatus.published && current.name.trim().isEmpty) {
@@ -785,6 +928,7 @@ class CreatorCubit extends Cubit<CreatorState> {
       savedAt: _formatDate(DateTime.now()),
       elements: [...current.elements],
       remoteId: remoteId,
+      clearDraft: clearDraft,
     );
     final designs = [...state.designs];
     final editingId = state.editingId;
@@ -799,14 +943,14 @@ class CreatorCubit extends Cubit<CreatorState> {
     if (status == DesignStatus.published) {
       emit(state.copyWith(
         designs: designs,
-        current: current.copyWith(name: stored.name, remoteId: stored.remoteId),
+        current: current.copyWith(name: stored.name, remoteId: stored.remoteId, clearDraft: clearDraft),
         editingId: storedId,
         publishedDesign: stored,
         view: StudioView.published,
         publishing: false,
         formTick: state.formTick + 1,
       ));
-      toast('Design published');
+      toast(successMessage ?? 'Design published');
       return;
     }
     emit(state.copyWith(
@@ -817,7 +961,7 @@ class CreatorCubit extends Cubit<CreatorState> {
       filter: DesignFilter.drafts,
       formTick: state.formTick + 1,
     ));
-    toast('Saved as draft — publish it anytime from My designs');
+    toast(successMessage ?? 'Saved as draft — publish it anytime from My designs');
   }
 
   void _applyImage(ImageSlot slot, Uint8List bytes) {

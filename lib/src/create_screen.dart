@@ -167,13 +167,16 @@ class PosterSection extends StatelessWidget {
                         offset: offset,
                         child: Transform.scale(
                           scale: zoom,
-                          child: PosterView(
-                            design: design,
-                            selected: state.selected,
-                            interactive: true,
-                            showGuide: state.showGuide,
-                            removing: state.removingBackground,
-                            onPinch: onPinch,
+                          child: RepaintBoundary(
+                            key: posterPreviewBoundaryKey,
+                            child: PosterView(
+                              design: design,
+                              selected: state.selected,
+                              interactive: true,
+                              showGuide: state.showGuide,
+                              removing: state.removingBackground,
+                              onPinch: onPinch,
+                            ),
                           ),
                         ),
                       ),
@@ -771,7 +774,7 @@ class DetailsSection extends StatelessWidget {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  Expanded(child: AppButton(label: 'Save draft', ghost: true, onPressed: cubit.saveDraft)),
+                  Expanded(child: AppButton(label: 'Save draft', ghost: true, onPressed: () => saveCurrentDesign(context))),
                   const SizedBox(width: 8),
                   Expanded(
                     child: AppButton(

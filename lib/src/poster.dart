@@ -8,16 +8,32 @@ import 'package:mideas_touch_creator/src/creator_cubit.dart';
 import 'package:mideas_touch_creator/src/models.dart';
 
 TextStyle posterTextStyle(DesignElement element, double fontSize) {
-  return GoogleFonts.getFont(
-    element.font,
-    fontSize: math.max(fontSize, 1),
-    fontWeight: element.bold ? FontWeight.w700 : FontWeight.w400,
-    fontStyle: element.italic ? FontStyle.italic : FontStyle.normal,
-    color: element.color,
-    height: 1.15,
-    decoration: element.underline ? TextDecoration.underline : TextDecoration.none,
-    decorationColor: element.color,
-  );
+  final size = math.max(fontSize, 1.0);
+  final weight = element.bold ? FontWeight.w700 : FontWeight.w400;
+  final style = element.italic ? FontStyle.italic : FontStyle.normal;
+  final decoration = element.underline ? TextDecoration.underline : TextDecoration.none;
+  try {
+    return GoogleFonts.getFont(
+      element.font,
+      fontSize: size,
+      fontWeight: weight,
+      fontStyle: style,
+      color: element.color,
+      height: 1.15,
+      decoration: decoration,
+      decorationColor: element.color,
+    );
+  } catch (_) {
+    return TextStyle(
+      fontSize: size,
+      fontWeight: weight,
+      fontStyle: style,
+      color: element.color,
+      height: 1.15,
+      decoration: decoration,
+      decorationColor: element.color,
+    );
+  }
 }
 
 double textPixelSize(DesignElement element, double canvasWidth) => canvasWidth * element.size / 400;

@@ -503,12 +503,13 @@ class StudioHeader extends StatelessWidget {
             onTap: () => context.read<CreatorCubit>().toggleTheme(currentlyDark: dark),
             child: Text(dark ? '☀' : '☾', style: const TextStyle(fontSize: 18)),
           ),
-          const SizedBox(width: 8),
-          SquareButton(
-            tooltip: 'Log out',
-            onTap: () => context.read<CreatorCubit>().logout(),
-            child: Text('⎋', style: poppins(context.colors, size: 16, height: 1)),
-          ),
+          // Hidden while login is disabled — re-enable together with the login screen.
+          // const SizedBox(width: 8),
+          // SquareButton(
+          //   tooltip: 'Log out',
+          //   onTap: () => context.read<CreatorCubit>().logout(),
+          //   child: Text('⎋', style: poppins(context.colors, size: 16, height: 1)),
+          // ),
         ],
       ),
     );

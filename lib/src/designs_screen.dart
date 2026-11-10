@@ -44,8 +44,14 @@ class _DesignList extends StatelessWidget {
           return ListView(
             children: [
               EmptyCard(
-                title: state.filter == DesignFilter.drafts ? 'No drafts' : 'No designs yet',
-                message: 'Designs you save or publish will appear here.',
+                title: state.filter == DesignFilter.drafts
+                    ? 'No drafts'
+                    : state.filter == DesignFilter.published
+                        ? 'No published designs'
+                        : 'No designs yet',
+                message: state.filter == DesignFilter.published
+                    ? 'Templates published in the last day will appear here.'
+                    : 'Designs you save or publish will appear here.',
                 action: 'Create design',
                 onAction: () => context.read<CreatorCubit>().newDesign(),
               ),

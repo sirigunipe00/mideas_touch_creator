@@ -202,6 +202,7 @@ class Design {
     this.status = '',
     this.savedAt = '',
     this.remoteId,
+    this.draftId,
   });
 
   final int id;
@@ -215,6 +216,7 @@ class Design {
   final String status;
   final String savedAt;
   final int? remoteId;
+  final int? draftId;
 
   List<int> get textIndexes => [
         for (var i = 0; i < elements.length; i++)
@@ -242,7 +244,9 @@ class Design {
     String? status,
     String? savedAt,
     int? remoteId,
+    int? draftId,
     bool clearRemote = false,
+    bool clearDraft = false,
   }) {
     return Design(
       id: id ?? this.id,
@@ -256,6 +260,7 @@ class Design {
       status: status ?? this.status,
       savedAt: savedAt ?? this.savedAt,
       remoteId: clearRemote ? null : (remoteId ?? this.remoteId),
+      draftId: clearDraft ? null : (draftId ?? this.draftId),
     );
   }
 }
