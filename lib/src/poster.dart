@@ -309,7 +309,7 @@ Rect _rectFor(DesignElement element, Size size) {
   final double height;
   switch (element.kind) {
     case ElementKind.image:
-      height = math.max(element.w / 100 * size.height, 1.0);
+      height = math.max((element.h > 0 ? element.h : element.w) / 100 * size.height, 1.0);
     case ElementKind.shape:
       height = math.max(element.h / 100 * size.height, 1.0);
     case ElementKind.text:

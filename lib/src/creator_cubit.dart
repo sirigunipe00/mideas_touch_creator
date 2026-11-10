@@ -464,6 +464,13 @@ class CreatorCubit extends Cubit<CreatorState> {
     }, record: false, form: false);
   }
 
+  void setHeight(double value) {
+    _updateSelected((element) {
+      if (element.kind != ElementKind.image) return element;
+      return element.copyWith(h: value);
+    }, record: false, form: false);
+  }
+
   void setRotation(double value) {
     _updateSelected((element) => element.copyWith(rotation: value), record: false, form: false);
   }

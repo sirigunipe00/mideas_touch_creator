@@ -663,10 +663,19 @@ class _Properties extends StatelessWidget {
             ),
             const FieldLabel('Change image'),
             _EmojiStrip(selected: element.imageBytes == null ? element.emoji : null, onTap: cubit.addEmoji),
+            _ValueSlider(
+              label: 'Height',
+              min: 8,
+              max: 90,
+              value: (element.h > 0 ? element.h : element.w).clamp(8.0, 90.0).toDouble(),
+              onChangeStart: cubit.beginLive,
+              onChanged: cubit.setHeight,
+              onChangeEnd: cubit.endLive,
+            ),
           ],
           if (element.kind != ElementKind.text)
             _ValueSlider(
-              label: 'Size',
+              label: 'Width',
               min: 8,
               max: 90,
               value: element.w.clamp(8.0, 90.0).toDouble(),

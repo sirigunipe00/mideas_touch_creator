@@ -3,7 +3,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:mideas_touch_creator/src/creator_cubit.dart';
 import 'package:mideas_touch_creator/src/models.dart';
 import 'package:mideas_touch_creator/src/poster.dart';
-import 'package:mideas_touch_creator/src/poster_capture.dart';
 import 'package:mideas_touch_creator/src/theme.dart';
 import 'package:mideas_touch_creator/src/ui.dart';
 
