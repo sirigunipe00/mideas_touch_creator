@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:mideas_touch_creator/src/background_removal.dart';
 import 'package:mideas_touch_creator/src/catalog.dart';
 import 'package:mideas_touch_creator/src/models.dart';
 import 'package:mideas_touch_creator/src/template_repository.dart';
@@ -650,39 +651,75 @@ class CreatorCubit extends Cubit<CreatorState> {
     }
   }
 
-  void removeBackground() {
+  Future<void> removeBackground({int? imageIndex}) async {
     final current = state.current;
-    final index = state.selected;
+    final index = imageIndex ?? state.selected;
     if (current == null || index < 0 || index >= current.elements.length) return;
     final element = current.elements[index];
-    if (element.kind != ElementKind.image || !element.photo || element.imageBytes != null) return;
+    if (element.kind != ElementKind.image) return;
+
+    // Emoji/photo placeholder: keep the old lightweight toggle.
+    if (element.imageBytes == null) {
+      if (!element.photo) return;
+      final token = ++_removeToken;
+      emit(state.copyWith(
+        history: [...state.history, _snap(current)],
+        future: const [],
+        removingBackground: true,
+      ));
+      Future<void>.delayed(const Duration(milliseconds: 900), () {
+        if (isClosed || token != _removeToken) return;
+        final latest = state.current;
+        if (latest == null || index >= latest.elements.length) {
+          emit(state.copyWith(removingBackground: false));
+          return;
+        }
+        final target = latest.elements[index];
+        if (target.kind != ElementKind.image || !target.photo || target.imageBytes != null) {
+          emit(state.copyWith(removingBackground: false));
+          return;
+        }
+        final elements = [...latest.elements];
+        elements[index] = target.copyWith(photo: false);
+        emit(state.copyWith(
+          current: latest.copyWith(elements: elements),
+          removingBackground: false,
+          formTick: state.formTick + 1,
+        ));
+        toast('Background removed');
+      });
+      return;
+    }
+
     final token = ++_removeToken;
     emit(state.copyWith(
       history: [...state.history, _snap(current)],
       future: const [],
       removingBackground: true,
     ));
-    Future<void>.delayed(const Duration(milliseconds: 1600), () {
+    try {
+      final cleaned = await removeSolidBackground(element.imageBytes!);
       if (isClosed || token != _removeToken) return;
       final latest = state.current;
       if (latest == null || index >= latest.elements.length) {
         emit(state.copyWith(removingBackground: false));
         return;
       }
-      final target = latest.elements[index];
-      if (target.kind != ElementKind.image || !target.photo) {
-        emit(state.copyWith(removingBackground: false));
-        return;
-      }
       final elements = [...latest.elements];
-      elements[index] = target.copyWith(photo: false);
+      elements[index] = latest.elements[index].copyWith(imageBytes: cleaned, photo: false);
       emit(state.copyWith(
         current: latest.copyWith(elements: elements),
         removingBackground: false,
         formTick: state.formTick + 1,
       ));
       toast('Background removed');
-    });
+    } catch (error, stackTrace) {
+      debugPrint('Background removal failed: $error\n$stackTrace');
+      if (!isClosed) {
+        emit(state.copyWith(removingBackground: false));
+        toast('Could not remove the background');
+      }
+    }
   }
 
   void saveDraft({Uint8List? poster}) {

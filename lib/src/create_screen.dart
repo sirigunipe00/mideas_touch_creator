@@ -651,15 +651,17 @@ class _Properties extends StatelessWidget {
             ),
           ],
           if (element.kind == ElementKind.image) ...[
-            if (element.imageBytes == null) ...[
-              const SizedBox(height: 10),
-              AppButton(
-                label: element.photo ? '✂ Remove Background' : '✓ Background removed',
-                ghost: true,
-                expand: true,
-                onPressed: element.photo ? cubit.removeBackground : null,
-              ),
-            ],
+            const SizedBox(height: 10),
+            AppButton(
+              label: element.imageBytes != null
+                  ? '✂ Remove Background'
+                  : element.photo
+                      ? '✂ Remove Background'
+                      : '✓ Background removed',
+              ghost: true,
+              expand: true,
+              onPressed: element.imageBytes != null || element.photo ? cubit.removeBackground : null,
+            ),
             UploadButton(
               label: '⬆ Replace from gallery',
               onTap: () => cubit.pickImage(ImageSlot.selectedOrNew),
@@ -762,6 +764,15 @@ class DetailsSection extends StatelessWidget {
                   label: image.imageBytes != null ? '✓ Image uploaded · change' : '⬆ Upload from gallery',
                   onTap: () => cubit.pickImage(ImageSlot.main),
                 ),
+                if (image.imageBytes != null) ...[
+                  const SizedBox(height: 8),
+                  AppButton(
+                    label: '✂ Remove Background',
+                    ghost: true,
+                    expand: true,
+                    onPressed: () => cubit.removeBackground(imageIndex: imageIndex),
+                  ),
+                ],
               ],
               const FieldLabel('Background'),
               _BackgroundRow(design: design),

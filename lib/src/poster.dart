@@ -387,7 +387,6 @@ class _ImageBody extends StatelessWidget {
         final radius = BorderRadius.circular(side * 0.06);
         final bytes = element.imageBytes;
         const photoShadow = BoxShadow(color: Color(0x40000000), blurRadius: 14, offset: Offset(0, 4));
-        const dropShadow = BoxShadow(color: Color(0x4D000000), blurRadius: 8, offset: Offset(0, 6));
         final emoji = Text(
           element.emoji,
           textAlign: TextAlign.center,
@@ -402,20 +401,27 @@ class _ImageBody extends StatelessWidget {
         if (bytes == null && !element.photo) {
           return Center(child: emoji);
         }
+        // Cut-out uploads: draw the PNG directly so transparent pixels show
+        // the template background (no card fill / rectangular drop shadow).
+        if (bytes != null) {
+          return Image.memory(
+            bytes,
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.medium,
+            gaplessPlayback: true,
+          );
+        }
         return DecoratedBox(
           decoration: BoxDecoration(
             borderRadius: radius,
-            boxShadow: [element.photo ? photoShadow : dropShadow],
-            gradient: bytes == null
-                ? const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Colors.white, Color(0xFFFCF4D3)],
-                  )
-                : null,
-            image: bytes == null ? null : DecorationImage(image: MemoryImage(bytes), fit: BoxFit.cover),
+            boxShadow: const [photoShadow],
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Colors.white, Color(0xFFFCF4D3)],
+            ),
           ),
-          child: Center(child: bytes == null ? emoji : const SizedBox.shrink()),
+          child: Center(child: emoji),
         );
       },
     );
