@@ -35,10 +35,14 @@
 <body>
   <!-- CanvasKit is required so publish can capture the design image in the browser. -->
   <script>
-    window.flutterConfiguration = {
-      renderer: "canvaskit"
-    };
+    {{flutter_js}}
+    {{flutter_build_config}}
+
+    _flutter.loader.load({
+      config: {
+        renderer: "canvaskit",
+      },
+    });
   </script>
-  <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

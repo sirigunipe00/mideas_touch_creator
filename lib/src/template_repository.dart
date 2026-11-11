@@ -72,15 +72,11 @@ class SupabaseTemplateRepository implements TemplateRepository {
     }
 
     if (design.elements.isNotEmpty) {
-      await _send(
-        'POST',
-        'template_elements',
-        [
-          for (var index = 0; index < design.elements.length; index++)
-            _element(id, design.elements[index], index),
-        ],
-        expectRows: false,
-      );
+      final payload = <Map<String, Object?>>[];
+      for (var index = 0; index < design.elements.length; index++) {
+        payload.add(await _elementPayload(id, design.elements[index], index));
+      }
+      await _send('POST', 'template_elements', payload, expectRows: false);
     }
     return id;
   }
@@ -151,10 +147,40 @@ class SupabaseTemplateRepository implements TemplateRepository {
       byTemplate.putIfAbsent(templateId, () => []).add(row);
     }
 
-    return [
+    return Future.wait([
       for (final row in rows)
-        _publishedFromRow(row, byTemplate[(row['id'] as num).toInt()] ?? const []),
+        _hydratePublished(
+          row,
+          byTemplate[(row['id'] as num).toInt()] ?? const [],
+        ),
+    ]);
+  }
+
+  Future<Design> _hydratePublished(
+    Map<String, dynamic> row,
+    List<Map<String, dynamic>> elementRows,
+  ) async {
+    final elements = [
+      for (final item in elementRows) await _hydratePublishedElement(item),
     ];
+
+    // Catalog-style templates often store only a flattened preview image.
+    Uint8List? backgroundImage;
+    final previewPath = row['background_image_path'] as String?;
+    if (elements.isEmpty && previewPath != null && previewPath.isNotEmpty) {
+      backgroundImage = await _downloadObject(previewPath);
+    }
+
+    return _publishedFromRow(row, elements, backgroundImage: backgroundImage);
+  }
+
+  Future<DesignElement> _hydratePublishedElement(Map<String, dynamic> json) async {
+    final element = _publishedElementFrom(json);
+    final path = json['image_path'] as String?;
+    if (path == null || path.isEmpty) return element;
+    final bytes = await _downloadObject(path);
+    if (bytes == null || bytes.isEmpty) return element;
+    return element.copyWith(imageBytes: bytes);
   }
 
   @override
@@ -162,7 +188,11 @@ class SupabaseTemplateRepository implements TemplateRepository {
     await _send('DELETE', 'saved_templates?id=eq.$draftId', null, expectRows: false);
   }
 
-  Design _publishedFromRow(Map<String, dynamic> row, List<Map<String, dynamic>> elements) {
+  Design _publishedFromRow(
+    Map<String, dynamic> row,
+    List<DesignElement> elements, {
+    Uint8List? backgroundImage,
+  }) {
     final id = (row['id'] as num).toInt();
     final categoryId = (row['category_id'] as num?)?.toInt() ?? 12;
     final categoryIndex = (categoryId - 1).clamp(0, Catalog.categories.length - 1);
@@ -174,7 +204,8 @@ class SupabaseTemplateRepository implements TemplateRepository {
       description: row['description'] as String? ?? '',
       bg1: _color(row['bg_from'], Catalog.backgrounds.first.$1),
       bg2: _color(row['bg_to'], Catalog.backgrounds.first.$2),
-      elements: [for (final item in elements) _publishedElementFrom(item)],
+      backgroundImage: backgroundImage,
+      elements: elements,
       status: DesignStatus.published,
       savedAt: _formatSavedAt(row['created_at'] ?? row['updated_at']),
     );
@@ -203,7 +234,7 @@ class SupabaseTemplateRepository implements TemplateRepository {
       emoji: json['emoji'] as String? ?? '',
       photo: json['is_photo'] == true,
       fill: _color(json['fill'], const Color(0x00000000)),
-      radius: json['shape_style'] as String? ?? '0',
+      radius: _radiusFromShapeStyle(json['shape_style'] as String?),
     );
   }
 
@@ -294,7 +325,22 @@ class SupabaseTemplateRepository implements TemplateRepository {
     return 'templates/draft-$base-${design.id}.png';
   }
 
-  Map<String, Object?> _element(int templateId, DesignElement element, int index) {
+  Future<Map<String, Object?>> _elementPayload(int templateId, DesignElement element, int index) async {
+    String? imagePath;
+    final bytes = element.imageBytes;
+    if (element.kind == ElementKind.image && bytes != null && bytes.isNotEmpty) {
+      imagePath = _elementImagePath(templateId, index, bytes);
+      await _uploadPoster(imagePath, bytes);
+    }
+    return _element(templateId, element, index, imagePath: imagePath);
+  }
+
+  Map<String, Object?> _element(
+    int templateId,
+    DesignElement element,
+    int index, {
+    String? imagePath,
+  }) {
     return {
       'template_id': templateId,
       'kind': element.kind.name,
@@ -309,19 +355,59 @@ class SupabaseTemplateRepository implements TemplateRepository {
       'underline': element.underline,
       'emoji': element.emoji,
       'fill': _hex(element.fill, alpha: true),
+      'shape_style': _shapeStyleForDb(element),
       'z_index': index,
       'font_family': element.font,
       'font_size': element.size.round(),
       'text_align': element.align.name,
       'is_photo': element.photo,
       'text_content': element.text,
+      'image_path': imagePath,
     };
+  }
+
+  /// Supabase allows only null / `rect` / `pill` on template_elements.shape_style.
+  String? _shapeStyleForDb(DesignElement element) {
+    if (element.kind != ElementKind.shape) return null;
+    switch (element.radius) {
+      case '50%':
+      case '999px':
+        return 'pill';
+      default:
+        return 'rect';
+    }
+  }
+
+  String _radiusFromShapeStyle(String? style) {
+    switch (style) {
+      case 'pill':
+        return '999px';
+      case 'rect':
+      default:
+        return '0';
+    }
   }
 
   String _imagePath(Design design) {
     final slug = design.name.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '');
     final base = slug.isEmpty ? 'design' : slug;
     return 'templates/$base-${design.id}.png';
+  }
+
+  String _elementImagePath(int templateId, int index, Uint8List bytes) {
+    final ext = _imageExtension(bytes);
+    return 'templates/elements/$templateId/$index.$ext';
+  }
+
+  String _imageExtension(Uint8List bytes) {
+    if (bytes.length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
+      return 'jpg';
+    }
+    return 'png';
+  }
+
+  String _imageContentType(Uint8List bytes) {
+    return _imageExtension(bytes) == 'jpg' ? 'image/jpeg' : 'image/png';
   }
 
   Future<void> _uploadPoster(String objectPath, Uint8List bytes) async {
@@ -331,7 +417,7 @@ class SupabaseTemplateRepository implements TemplateRepository {
       headers: {
         'apikey': SupabaseConfig.publishableKey,
         'Authorization': 'Bearer ${SupabaseConfig.publishableKey}',
-        'Content-Type': 'image/png',
+        'Content-Type': _imageContentType(bytes),
         'x-upsert': 'true',
       },
       body: bytes,
@@ -340,6 +426,22 @@ class SupabaseTemplateRepository implements TemplateRepository {
       debugPrint('Publish storage error ${response.statusCode}: ${response.body}');
       throw TemplatePublishException(_storageMessage(response));
     }
+  }
+
+  Future<Uint8List?> _downloadObject(String objectPath) async {
+    final uri = Uri.parse('${SupabaseConfig.url}/storage/v1/object/app-assets/$objectPath');
+    final response = await _client.get(
+      uri,
+      headers: {
+        'apikey': SupabaseConfig.publishableKey,
+        'Authorization': 'Bearer ${SupabaseConfig.publishableKey}',
+      },
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      debugPrint('Storage download error ${response.statusCode}: $objectPath');
+      return null;
+    }
+    return response.bodyBytes;
   }
 
   String _storageMessage(http.Response response) {
