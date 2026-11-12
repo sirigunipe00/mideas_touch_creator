@@ -17,6 +17,8 @@ class TemplatePublishException implements Exception {
 }
 
 abstract class TemplateRepository {
+  void setAuth({String? accessToken, String? userId, String? email});
+
   Future<int> publish(Design design, {required String authorName, Uint8List? poster});
 
   Future<int> saveDraft(Design design, {required String authorName, Uint8List? poster});
@@ -35,22 +37,39 @@ class SupabaseTemplateRepository implements TemplateRepository {
   SupabaseTemplateRepository({http.Client? client}) : _client = client ?? http.Client();
 
   final http.Client _client;
+  String? _accessToken;
+  String? _userId;
+  String? _email;
+
+  @override
+  void setAuth({String? accessToken, String? userId, String? email}) {
+    _accessToken = accessToken;
+    _userId = userId;
+    _email = email?.trim().toLowerCase();
+  }
 
   @override
   Future<int> publish(Design design, {required String authorName, Uint8List? poster}) async {
-    String? imagePath;
-    if (poster != null && poster.isNotEmpty) {
-      imagePath = _imagePath(design);
-      await _uploadPoster(imagePath, poster);
+    final userId = _requireUserId();
+    final email = _requireEmail();
+    if (poster == null || poster.isEmpty) {
+      throw TemplatePublishException(
+        'Could not create the full design image. Try publishing again.',
+      );
     }
+    final imagePath = _imagePath(design);
+    await _uploadPoster(imagePath, poster);
     final body = <String, Object?>{
       'name': design.name.trim(),
       'category_id': _categoryId(design.category),
       'description': design.description,
       'bg_from': _hex(design.bg1),
       'bg_to': _hex(design.bg2),
-      if (imagePath != null) 'background_image_path': imagePath,
+      // Single flattened template image (bg + main + text baked in).
+      'background_image_path': imagePath,
       'author_name': authorName.trim().isEmpty ? 'Creator' : authorName.trim(),
+      'published_by': email,
+      'creator_id': userId,
       'is_premium': false,
       'price_inr': 0,
       'status': 'published',
@@ -83,6 +102,7 @@ class SupabaseTemplateRepository implements TemplateRepository {
 
   @override
   Future<int> saveDraft(Design design, {required String authorName, Uint8List? poster}) async {
+    final email = _requireEmail();
     String? imagePath;
     if (poster != null && poster.isNotEmpty) {
       imagePath = _draftImagePath(design);
@@ -97,8 +117,10 @@ class SupabaseTemplateRepository implements TemplateRepository {
       'background_image': design.backgroundImage == null ? null : base64Encode(design.backgroundImage!),
       if (imagePath != null) 'preview_image_path': imagePath,
       'author_name': authorName.trim().isEmpty ? 'Creator' : authorName.trim(),
+      'published_by': email,
       'status': 'draft',
       'elements': [for (final element in design.elements) _draftElement(element)],
+      // saved_templates.updated_at is timestamptz — must be ISO-8601, not IST display text.
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     };
     if (design.draftId == null) {
@@ -115,21 +137,42 @@ class SupabaseTemplateRepository implements TemplateRepository {
 
   @override
   Future<List<Design>> fetchDrafts() async {
-    final rows = await _send('GET', 'saved_templates?status=eq.draft&order=updated_at.desc', null);
-    return [for (final row in rows) _draftFromRow(row)];
+    final email = _requireEmail();
+    final rows = await _send(
+      'GET',
+      'saved_templates',
+      null,
+      query: {
+        'status': 'eq.draft',
+        'published_by': 'eq.$email',
+        'order': 'updated_at.desc.nullslast,id.desc',
+      },
+    );
+    return Future.wait([for (final row in rows) _hydrateDraft(row)]);
+  }
+
+  Future<Design> _hydrateDraft(Map<String, dynamic> row) async {
+    final design = _draftFromRow(row);
+    final previewPath = row['preview_image_path'] as String?;
+    if (previewPath == null || previewPath.isEmpty) return design;
+    final preview = await _downloadObject(previewPath);
+    if (preview == null || preview.isEmpty) return design;
+    return design.copyWith(previewImage: preview);
   }
 
   @override
   Future<List<Design>> fetchPublished({Duration within = const Duration(days: 1)}) async {
-    final since = DateTime.now().toUtc().subtract(within).toIso8601String();
+    final email = _requireEmail();
+    final since = _formatIstDateTime(DateTime.now().toUtc().subtract(within));
     final rows = await _send(
       'GET',
       'templates',
       null,
       query: {
         'status': 'eq.published',
+        'published_by': 'eq.$email',
         'created_at': 'gte.$since',
-        'order': 'created_at.desc',
+        'order': 'created_at.desc.nullslast,id.desc',
       },
     );
     if (rows.isEmpty) return const [];
@@ -164,14 +207,14 @@ class SupabaseTemplateRepository implements TemplateRepository {
       for (final item in elementRows) await _hydratePublishedElement(item),
     ];
 
-    // Catalog-style templates often store only a flattened preview image.
-    Uint8List? backgroundImage;
+    // Always load the flattened full-template image for My designs list.
+    Uint8List? previewImage;
     final previewPath = row['background_image_path'] as String?;
-    if (elements.isEmpty && previewPath != null && previewPath.isNotEmpty) {
-      backgroundImage = await _downloadObject(previewPath);
+    if (previewPath != null && previewPath.isNotEmpty) {
+      previewImage = await _downloadObject(previewPath);
     }
 
-    return _publishedFromRow(row, elements, backgroundImage: backgroundImage);
+    return _publishedFromRow(row, elements, previewImage: previewImage);
   }
 
   Future<DesignElement> _hydratePublishedElement(Map<String, dynamic> json) async {
@@ -185,13 +228,38 @@ class SupabaseTemplateRepository implements TemplateRepository {
 
   @override
   Future<void> deleteDraft(int draftId) async {
-    await _send('DELETE', 'saved_templates?id=eq.$draftId', null, expectRows: false);
+    final email = _requireEmail();
+    await _send(
+      'DELETE',
+      'saved_templates?id=eq.$draftId&published_by=eq.$email',
+      null,
+      expectRows: false,
+    );
   }
+
+  String _requireUserId() {
+    final userId = _userId;
+    if (userId == null || userId.isEmpty) {
+      throw TemplatePublishException('Please login to continue');
+    }
+    return userId;
+  }
+
+  String _requireEmail() {
+    final email = _email;
+    if (email == null || email.isEmpty) {
+      throw TemplatePublishException('Please login to continue');
+    }
+    return email;
+  }
+
+  String _bearerToken() =>
+      (_accessToken != null && _accessToken!.isNotEmpty) ? _accessToken! : SupabaseConfig.publishableKey;
 
   Design _publishedFromRow(
     Map<String, dynamic> row,
     List<DesignElement> elements, {
-    Uint8List? backgroundImage,
+    Uint8List? previewImage,
   }) {
     final id = (row['id'] as num).toInt();
     final categoryId = (row['category_id'] as num?)?.toInt() ?? 12;
@@ -204,10 +272,11 @@ class SupabaseTemplateRepository implements TemplateRepository {
       description: row['description'] as String? ?? '',
       bg1: _color(row['bg_from'], Catalog.backgrounds.first.$1),
       bg2: _color(row['bg_to'], Catalog.backgrounds.first.$2),
-      backgroundImage: backgroundImage,
+      previewImage: previewImage,
       elements: elements,
       status: DesignStatus.published,
       savedAt: _formatSavedAt(row['created_at'] ?? row['updated_at']),
+      updatedAt: _parseDateTime(row['created_at'] ?? row['updated_at']),
     );
   }
 
@@ -254,7 +323,8 @@ class SupabaseTemplateRepository implements TemplateRepository {
           ? [for (final item in elements) if (item is Map) _draftElementFrom(Map<String, dynamic>.from(item))]
           : const [],
       status: DesignStatus.draft,
-      savedAt: _formatSavedAt(row['updated_at']),
+      savedAt: _formatSavedAt(row['updated_at'] ?? row['created_at']),
+      updatedAt: _parseDateTime(row['updated_at'] ?? row['created_at']),
     );
   }
 
@@ -313,16 +383,42 @@ class SupabaseTemplateRepository implements TemplateRepository {
   double _number(Object? value, [double fallback = 0]) => value is num ? value.toDouble() : fallback;
 
   String _formatSavedAt(Object? value) {
-    final date = value is String ? DateTime.tryParse(value)?.toLocal() : null;
+    if (value is String && _istPattern.hasMatch(value)) return value;
+    final date = _parseDateTime(value);
     if (date == null) return '';
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return '${date.day} ${months[date.month - 1]} ${date.year}';
+    return _formatIstDateTime(date);
+  }
+
+  DateTime? _parseDateTime(Object? value) {
+    if (value is! String || value.isEmpty) return null;
+    final match = _istPattern.firstMatch(value);
+    if (match != null) {
+      return DateTime(
+        int.parse(match.group(1)!),
+        int.parse(match.group(2)!),
+        int.parse(match.group(3)!),
+        int.parse(match.group(4)!),
+        int.parse(match.group(5)!),
+        int.parse(match.group(6)!),
+      );
+    }
+    return DateTime.tryParse(value);
+  }
+
+  static final _istPattern = RegExp(r'^(\d{4})-(\d{2})-(\d{2}) (\d{2})-(\d{2})-(\d{2})$');
+
+  /// Indian Standard Time: `yyyy-mm-dd HH-mm-ss`
+  String _formatIstDateTime(DateTime date) {
+    final ist = date.toUtc().add(const Duration(hours: 5, minutes: 30));
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${ist.year}-${two(ist.month)}-${two(ist.day)} ${two(ist.hour)}-${two(ist.minute)}-${two(ist.second)}';
   }
 
   String _draftImagePath(Design design) {
     final slug = design.name.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '');
     final base = slug.isEmpty ? 'draft' : slug;
-    return 'templates/draft-$base-${design.id}.png';
+    // Timestamp prefix so Storage Files name-sort matches upload time.
+    return 'templates/${_uploadStamp()}-draft-$base.png';
   }
 
   Future<Map<String, Object?>> _elementPayload(int templateId, DesignElement element, int index) async {
@@ -391,12 +487,20 @@ class SupabaseTemplateRepository implements TemplateRepository {
   String _imagePath(Design design) {
     final slug = design.name.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '');
     final base = slug.isEmpty ? 'design' : slug;
-    return 'templates/$base-${design.id}.png';
+    // Timestamp prefix so Storage Files name-sort matches upload time.
+    return 'templates/${_uploadStamp()}-$base.png';
   }
 
   String _elementImagePath(int templateId, int index, Uint8List bytes) {
     final ext = _imageExtension(bytes);
-    return 'templates/elements/$templateId/$index.$ext';
+    return 'templates/elements/$templateId/${_uploadStamp()}-$index.$ext';
+  }
+
+  /// Lexicographically sortable UTC stamp (ascending name == ascending upload time).
+  String _uploadStamp() {
+    final now = DateTime.now().toUtc();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${now.year}${two(now.month)}${two(now.day)}T${two(now.hour)}${two(now.minute)}${two(now.second)}';
   }
 
   String _imageExtension(Uint8List bytes) {
@@ -416,7 +520,7 @@ class SupabaseTemplateRepository implements TemplateRepository {
       uri,
       headers: {
         'apikey': SupabaseConfig.publishableKey,
-        'Authorization': 'Bearer ${SupabaseConfig.publishableKey}',
+        'Authorization': 'Bearer ${_bearerToken()}',
         'Content-Type': _imageContentType(bytes),
         'x-upsert': 'true',
       },
@@ -434,7 +538,7 @@ class SupabaseTemplateRepository implements TemplateRepository {
       uri,
       headers: {
         'apikey': SupabaseConfig.publishableKey,
-        'Authorization': 'Bearer ${SupabaseConfig.publishableKey}',
+        'Authorization': 'Bearer ${_bearerToken()}',
       },
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -474,7 +578,7 @@ class SupabaseTemplateRepository implements TemplateRepository {
         : raw.replace(queryParameters: {...raw.queryParameters, ...query});
     final headers = <String, String>{
       'apikey': SupabaseConfig.publishableKey,
-      'Authorization': 'Bearer ${SupabaseConfig.publishableKey}',
+      'Authorization': 'Bearer ${_bearerToken()}',
       'Prefer': 'return=representation',
       if (body != null) 'Content-Type': 'application/json',
     };

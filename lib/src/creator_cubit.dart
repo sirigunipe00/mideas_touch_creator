@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:mideas_touch_creator/src/auth_repository.dart';
 import 'package:mideas_touch_creator/src/background_removal.dart';
 import 'package:mideas_touch_creator/src/catalog.dart';
 import 'package:mideas_touch_creator/src/models.dart';
@@ -39,6 +40,7 @@ class CreatorState {
     required this.toastMessage,
     required this.toastTick,
     required this.publishing,
+    required this.authBusy,
   });
 
   factory CreatorState.initial() {
@@ -69,6 +71,7 @@ class CreatorState {
       toastMessage: null,
       toastTick: 0,
       publishing: false,
+      authBusy: false,
     );
   }
 
@@ -98,6 +101,7 @@ class CreatorState {
   final String? toastMessage;
   final int toastTick;
   final bool publishing;
+  final bool authBusy;
 
   bool get canUndo => history.isNotEmpty;
   bool get canRedo => future.isNotEmpty;
@@ -153,6 +157,7 @@ class CreatorState {
     String? toastMessage,
     int? toastTick,
     bool? publishing,
+    bool? authBusy,
   }) {
     return CreatorState(
       splash: splash ?? this.splash,
@@ -181,32 +186,56 @@ class CreatorState {
       toastMessage: toastMessage ?? this.toastMessage,
       toastTick: toastTick ?? this.toastTick,
       publishing: publishing ?? this.publishing,
+      authBusy: authBusy ?? this.authBusy,
     );
   }
 }
 
 class CreatorCubit extends Cubit<CreatorState> {
-  CreatorCubit({TemplateRepository? templates})
-      : _templates = templates ?? SupabaseTemplateRepository(),
+  CreatorCubit({
+    TemplateRepository? templates,
+    AuthRepository? auth,
+  })  : _templates = templates ?? SupabaseTemplateRepository(),
+        _auth = auth ?? SupabaseAuthRepository(),
         super(CreatorState.initial()) {
-    _loadRemoteDesigns();
+    _restoreSession();
   }
 
   final TemplateRepository _templates;
+  final AuthRepository _auth;
   final ImagePicker _picker = ImagePicker();
   bool _live = false;
   Timer? _liveTimer;
   int _removeToken = 0;
   EditorSnapshot? _gestureBefore;
+  bool _sessionReady = false;
+  bool _splashDismissRequested = false;
+
+  Future<void> _restoreSession() async {
+    try {
+      final session = await _auth.restoreSession();
+      if (!isClosed && session != null) {
+        _applySession(session, openStudio: false);
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Session restore failed: $error\n$stackTrace');
+    } finally {
+      _sessionReady = true;
+      if (!isClosed) _finishSplashIfReady();
+    }
+  }
 
   void dismissSplash() {
-    if (!state.splash) return;
+    _splashDismissRequested = true;
+    _finishSplashIfReady();
+  }
+
+  void _finishSplashIfReady() {
+    if (!_sessionReady || !_splashDismissRequested || !state.splash) return;
     emit(state.copyWith(splash: false));
-    // Login/registration is hidden for now — enter as a guest creator.
-    // To re-enable, remove this block; _StudioPage shows LoginScreen when user is null.
-    if (state.user == null) {
-      emit(state.copyWith(user: const StudioUser(name: 'Creator', email: '')));
+    if (state.user != null && state.current == null) {
       newDesign();
+      _loadRemoteDesigns();
     }
   }
 
@@ -226,48 +255,103 @@ class CreatorCubit extends Cubit<CreatorState> {
 
   void setAgreed(bool value) => emit(state.copyWith(agreed: value));
 
-  void submitAuth() {
+  Future<void> submitAuth() async {
+    if (state.authBusy) return;
     final register = state.authTab == AuthTab.register;
+    final email = state.email.trim();
+    final password = state.password;
     if (register && state.name.trim().isEmpty) {
       toast('Enter your full name');
       return;
     }
-    if (!RegExp(r'\S+@\S+\.\S+').hasMatch(state.email)) {
-      toast('Enter a valid email');
+    if (!_isValidEmail(email)) {
+      toast('Enter a valid email address');
       return;
     }
-    if (state.password.length < 6) {
-      toast('Password must be 6+ characters');
+    if (register && password.length < 8) {
+      toast('Password must be at least 8 characters');
       return;
     }
-    if (register && !state.agreed) {
-      toast('Please accept the creator terms');
+    if (!register && password.isEmpty) {
+      toast('Enter your password');
       return;
     }
-    final user = StudioUser(
-      name: state.name.trim().isEmpty ? 'Creator' : state.name.trim(),
-      email: state.email,
-    );
-    emit(state.copyWith(user: user));
-    newDesign();
-    toast(register ? 'Creator account created' : 'Welcome back');
+
+    emit(state.copyWith(authBusy: true));
+    try {
+      final session = register
+          ? await _auth.register(name: state.name.trim(), email: email, password: password)
+          : await _auth.login(email: email, password: password);
+      if (isClosed) return;
+      _applySession(session, openStudio: true);
+      toast(register ? 'Creator account created' : 'Welcome back');
+    } on AuthException catch (error, stackTrace) {
+      debugPrint('Auth failed: $error\n$stackTrace');
+      if (!isClosed) {
+        emit(state.copyWith(authBusy: false));
+        toast(error.message);
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Auth failed: $error\n$stackTrace');
+      if (!isClosed) {
+        emit(state.copyWith(authBusy: false));
+        final detail = error.toString();
+        toast(
+          detail.length <= 120
+              ? detail
+              : (register ? 'Could not create the account' : 'Could not login'),
+        );
+      }
+    }
   }
 
-  void forgotPassword() => toast('Reset link sent');
+  void _applySession(AuthSession session, {required bool openStudio}) {
+    _templates.setAuth(
+      accessToken: session.accessToken,
+      userId: session.user.id,
+      email: session.user.email,
+    );
+    emit(state.copyWith(
+      user: session.user,
+      authBusy: false,
+      password: '',
+      designs: const [],
+      clearCurrent: true,
+      clearEditing: true,
+    ));
+    if (openStudio || !state.splash) {
+      newDesign();
+      _loadRemoteDesigns();
+    }
+  }
 
-  void logout() {
+  bool _isValidEmail(String email) {
+    return RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email);
+  }
+
+  Future<void> logout() async {
     _cancelAsync();
+    try {
+      await _auth.logout();
+    } catch (_) {}
+    _templates.setAuth(accessToken: null, userId: null, email: null);
+    if (isClosed) return;
     emit(state.copyWith(
       clearUser: true,
       clearCurrent: true,
       clearEditing: true,
+      designs: const [],
+      publishedDesign: null,
       password: '',
       authTab: AuthTab.login,
       selected: -1,
       clearTool: true,
       removingBackground: false,
       showGuide: false,
+      authBusy: false,
+      view: StudioView.create,
     ));
+    toast('Logged out');
   }
 
   void newDesign() {
@@ -723,7 +807,7 @@ class CreatorCubit extends Cubit<CreatorState> {
   }
 
   void saveDraft({Uint8List? poster}) {
-    _save(DesignStatus.draft);
+    _save(DesignStatus.draft, poster: poster);
     final editingId = state.editingId;
     if (editingId == null) return;
     for (final design in state.designs) {
@@ -756,11 +840,25 @@ class CreatorCubit extends Cubit<CreatorState> {
       if (isClosed) return;
       final designs = [...state.designs];
       final index = designs.indexWhere((item) => item.id == design.id);
-      if (index >= 0) designs[index] = designs[index].copyWith(draftId: draftId);
+      if (index >= 0) {
+        var updated = designs[index].copyWith(draftId: draftId);
+        if (poster != null && poster.isNotEmpty) {
+          updated = updated.copyWith(previewImage: poster);
+        }
+        designs[index] = updated;
+      }
       final current = state.current;
+      Design? nextCurrent = current;
+      if (current != null && current.id == design.id) {
+        nextCurrent = current.copyWith(draftId: draftId);
+        if (poster != null && poster.isNotEmpty) {
+          nextCurrent = nextCurrent.copyWith(previewImage: poster);
+        }
+      }
       emit(state.copyWith(
         designs: designs,
-        current: current != null && current.id == design.id ? current.copyWith(draftId: draftId) : current,
+        current: nextCurrent,
+        formTick: state.formTick + 1,
       ));
     } catch (error, stackTrace) {
       debugPrint('Draft sync failed: $error\n$stackTrace');
@@ -770,6 +868,7 @@ class CreatorCubit extends Cubit<CreatorState> {
   }
 
   Future<void> _loadRemoteDesigns() async {
+    if (state.user == null) return;
     List<Design> drafts = const [];
     List<Design> published = const [];
     try {
@@ -787,6 +886,7 @@ class CreatorCubit extends Cubit<CreatorState> {
   }
 
   Future<void> _loadPublished() async {
+    if (state.user == null) return;
     try {
       final published = await _templates.fetchPublished();
       if (isClosed) return;
@@ -822,13 +922,18 @@ class CreatorCubit extends Cubit<CreatorState> {
       }
     }
 
-    designs.sort((a, b) {
-      final aPublished = a.status == DesignStatus.published;
-      final bPublished = b.status == DesignStatus.published;
-      if (aPublished != bPublished) return aPublished ? -1 : 1;
-      return b.id.compareTo(a.id);
-    });
+    designs.sort(_compareDesignsNewestFirst);
     emit(state.copyWith(designs: designs, formTick: state.formTick + 1));
+  }
+
+  int _compareDesignsNewestFirst(Design a, Design b) {
+    final aTime = a.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(a.id, isUtc: true);
+    final bTime = b.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(b.id, isUtc: true);
+    final byTime = bTime.compareTo(aTime);
+    if (byTime != 0) return byTime;
+    final aKey = a.remoteId ?? a.draftId ?? a.id;
+    final bKey = b.remoteId ?? b.draftId ?? b.id;
+    return bKey.compareTo(aKey);
   }
 
   Future<void> _deleteRemoteDraft(int draftId) async {
@@ -860,6 +965,7 @@ class CreatorCubit extends Cubit<CreatorState> {
         DesignStatus.published,
         remoteId: remoteId,
         clearDraft: true,
+        poster: poster,
         successMessage: poster == null || poster.isEmpty
             ? 'Design published — preview image could not be created'
             : null,
@@ -901,12 +1007,18 @@ class CreatorCubit extends Cubit<CreatorState> {
       final next = [...state.designs];
       final nextIndex = next.indexWhere((item) => item.id == id);
       if (nextIndex >= 0) {
-        next[nextIndex] = next[nextIndex].copyWith(
+        var updated = next[nextIndex].copyWith(
           status: DesignStatus.published,
           remoteId: remoteId,
           clearDraft: true,
+          updatedAt: DateTime.now(),
         );
+        if (poster != null && poster.isNotEmpty) {
+          updated = updated.copyWith(previewImage: poster);
+        }
+        next[nextIndex] = updated;
       }
+      next.sort(_compareDesignsNewestFirst);
       emit(state.copyWith(designs: next, publishing: false, formTick: state.formTick + 1));
       toast(
         poster == null || poster.isEmpty
@@ -947,10 +1059,17 @@ class CreatorCubit extends Cubit<CreatorState> {
   Future<void> close() {
     _cancelAsync();
     _templates.close();
+    _auth.close();
     return super.close();
   }
 
-  void _save(String status, {int? remoteId, bool clearDraft = false, String? successMessage}) {
+  void _save(
+    String status, {
+    int? remoteId,
+    bool clearDraft = false,
+    Uint8List? poster,
+    String? successMessage,
+  }) {
     var current = state.current;
     if (current == null) return;
     if (status == DesignStatus.published && current.name.trim().isEmpty) {
@@ -960,13 +1079,18 @@ class CreatorCubit extends Cubit<CreatorState> {
     if (current.name.trim().isEmpty) {
       current = current.copyWith(name: 'Untitled design');
     }
-    final saved = current.copyWith(
+    final now = DateTime.now();
+    var saved = current.copyWith(
       status: status,
-      savedAt: _formatDate(DateTime.now()),
+      savedAt: _formatDate(now),
+      updatedAt: now,
       elements: [...current.elements],
       remoteId: remoteId,
       clearDraft: clearDraft,
     );
+    if (poster != null && poster.isNotEmpty) {
+      saved = saved.copyWith(previewImage: poster);
+    }
     final designs = [...state.designs];
     final editingId = state.editingId;
     final index = editingId == null ? -1 : designs.indexWhere((design) => design.id == editingId);
@@ -977,10 +1101,16 @@ class CreatorCubit extends Cubit<CreatorState> {
     } else {
       designs[index] = stored;
     }
+    designs.sort(_compareDesignsNewestFirst);
     if (status == DesignStatus.published) {
       emit(state.copyWith(
         designs: designs,
-        current: current.copyWith(name: stored.name, remoteId: stored.remoteId, clearDraft: clearDraft),
+        current: current.copyWith(
+          name: stored.name,
+          remoteId: stored.remoteId,
+          clearDraft: clearDraft,
+          previewImage: stored.previewImage,
+        ),
         editingId: storedId,
         publishedDesign: stored,
         view: StudioView.published,
@@ -992,7 +1122,7 @@ class CreatorCubit extends Cubit<CreatorState> {
     }
     emit(state.copyWith(
       designs: designs,
-      current: current.copyWith(name: stored.name),
+      current: current.copyWith(name: stored.name, previewImage: stored.previewImage),
       editingId: storedId,
       view: StudioView.mine,
       filter: DesignFilter.drafts,
@@ -1137,9 +1267,11 @@ class CreatorCubit extends Cubit<CreatorState> {
     );
   }
 
+  /// Indian Standard Time: `yyyy-mm-dd HH-mm-ss`
   String _formatDate(DateTime date) {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return '${date.day} ${months[date.month - 1]} ${date.year}';
+    final ist = date.toUtc().add(const Duration(hours: 5, minutes: 30));
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${ist.year}-${two(ist.month)}-${two(ist.day)} ${two(ist.hour)}-${two(ist.minute)}-${two(ist.second)}';
   }
 
   Future<Uint8List> _downscale(Uint8List bytes) async {

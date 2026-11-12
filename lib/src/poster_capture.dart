@@ -32,13 +32,35 @@ class PosterExportHost extends StatefulWidget {
 
   static Future<Uint8List?> captureKey(GlobalKey key) async {
     try {
-      final boundary = key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      RenderRepaintBoundary? boundary =
+          key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (boundary == null || !boundary.hasSize || boundary.size.isEmpty) return null;
-      for (var attempt = 0; attempt < 6; attempt++) {
+
+      // Wait until the layer is painted. Only read debugNeedsPaint in debug —
+      // in release that getter throws LateInitializationError.
+      for (var attempt = 0; attempt < 20; attempt++) {
         await WidgetsBinding.instance.endOfFrame;
-        if (!boundary.debugNeedsPaint) break;
+        boundary = key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+        if (boundary == null || !boundary.hasSize || boundary.size.isEmpty) return null;
+        if (kDebugMode) {
+          if (!boundary.debugNeedsPaint) break;
+        } else if (attempt >= (kIsWeb ? 5 : 2)) {
+          break;
+        }
+        await Future<void>.delayed(Duration(milliseconds: 16 + attempt * 8));
       }
-      await Future<void>.delayed(const Duration(milliseconds: 32));
+
+      await Future<void>.delayed(Duration(milliseconds: kIsWeb ? 80 : 24));
+      boundary = key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null || !boundary.hasSize || boundary.size.isEmpty) return null;
+      if (kDebugMode && boundary.debugNeedsPaint) {
+        await WidgetsBinding.instance.endOfFrame;
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        boundary = key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+        if (boundary == null || !boundary.hasSize) return null;
+        if (boundary.debugNeedsPaint) return null;
+      }
+
       final image = await boundary.toImage(pixelRatio: _pixelRatioFor(boundary.size));
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       image.dispose();
@@ -116,19 +138,23 @@ class _PosterExportHostState extends State<PosterExportHost> {
   @override
   Widget build(BuildContext context) {
     final design = _design;
+    // Keep on-screen with tiny opacity so CanvasKit still paints (fully offscreen often fails on web).
     return Positioned(
-      left: -_exportSize * 2,
+      left: 0,
       top: 0,
       width: _exportSize,
       height: _exportSize,
       child: IgnorePointer(
-        child: RepaintBoundary(
-          key: _boundaryKey,
-          child: ColoredBox(
-            color: Colors.white,
-            child: design == null
-                ? const SizedBox.expand()
-                : PosterView(design: design, selected: -1, interactive: false),
+        child: Opacity(
+          opacity: design == null ? 0 : 0.01,
+          child: RepaintBoundary(
+            key: _boundaryKey,
+            child: ColoredBox(
+              color: Colors.white,
+              child: design == null
+                  ? const SizedBox.expand()
+                  : PosterView(design: design, selected: -1, interactive: false),
+            ),
           ),
         ),
       ),

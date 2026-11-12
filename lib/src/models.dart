@@ -20,8 +20,13 @@ class DesignStatus {
 }
 
 class StudioUser {
-  const StudioUser({required this.name, required this.email});
+  const StudioUser({
+    required this.id,
+    required this.name,
+    required this.email,
+  });
 
+  final String id;
   final String name;
   final String email;
 }
@@ -199,8 +204,10 @@ class Design {
     required this.bg2,
     required this.elements,
     this.backgroundImage,
+    this.previewImage,
     this.status = '',
     this.savedAt = '',
+    this.updatedAt,
     this.remoteId,
     this.draftId,
   });
@@ -212,9 +219,13 @@ class Design {
   final Color bg1;
   final Color bg2;
   final Uint8List? backgroundImage;
+  /// Flattened full-template image used in My designs list.
+  final Uint8List? previewImage;
   final List<DesignElement> elements;
   final String status;
   final String savedAt;
+  /// Used to sort My designs newest-first.
+  final DateTime? updatedAt;
   final int? remoteId;
   final int? draftId;
 
@@ -240,9 +251,11 @@ class Design {
     Color? bg1,
     Color? bg2,
     Object? backgroundImage = _unset,
+    Object? previewImage = _unset,
     List<DesignElement>? elements,
     String? status,
     String? savedAt,
+    DateTime? updatedAt,
     int? remoteId,
     int? draftId,
     bool clearRemote = false,
@@ -256,9 +269,11 @@ class Design {
       bg1: bg1 ?? this.bg1,
       bg2: bg2 ?? this.bg2,
       backgroundImage: identical(backgroundImage, _unset) ? this.backgroundImage : backgroundImage as Uint8List?,
+      previewImage: identical(previewImage, _unset) ? this.previewImage : previewImage as Uint8List?,
       elements: elements ?? this.elements,
       status: status ?? this.status,
       savedAt: savedAt ?? this.savedAt,
+      updatedAt: updatedAt ?? this.updatedAt,
       remoteId: clearRemote ? null : (remoteId ?? this.remoteId),
       draftId: clearDraft ? null : (draftId ?? this.draftId),
     );

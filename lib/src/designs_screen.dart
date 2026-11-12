@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:mideas_touch_creator/src/creator_cubit.dart';
@@ -5,6 +7,32 @@ import 'package:mideas_touch_creator/src/models.dart';
 import 'package:mideas_touch_creator/src/poster.dart';
 import 'package:mideas_touch_creator/src/theme.dart';
 import 'package:mideas_touch_creator/src/ui.dart';
+
+/// Shows the flattened template image when available (preferred for My designs).
+class DesignPreviewThumb extends StatelessWidget {
+  const DesignPreviewThumb({
+    super.key,
+    required this.design,
+    this.fit = BoxFit.cover,
+  });
+
+  final Design design;
+  final BoxFit fit;
+
+  @override
+  Widget build(BuildContext context) {
+    final Uint8List? preview = design.previewImage;
+    if (preview != null && preview.isNotEmpty) {
+      return Image.memory(
+        preview,
+        fit: fit,
+        gaplessPlayback: true,
+        filterQuality: FilterQuality.medium,
+      );
+    }
+    return PosterView(design: design, selected: -1, interactive: false);
+  }
+}
 
 class MyDesignsScreen extends StatelessWidget {
   const MyDesignsScreen({super.key});
@@ -80,7 +108,8 @@ class _DesignList extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                     child: SizedBox(
                       width: 64,
-                      child: PosterView(design: design),
+                      height: 90,
+                      child: DesignPreviewThumb(design: design),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -105,24 +134,19 @@ class _DesignList extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(design.savedAt, style: poppins(colors, size: 12, color: colors.muted)),
                         const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            AppButton(label: 'Edit', ghost: true, small: true, onPressed: () => cubit.editDesign(design.id)),
-                            // AppButton(
-                            //   label: state.publishing && !published ? 'Publishing...' : published ? 'Unpublish' : 'Publish',
-                            //   small: true,
-                            //   onPressed: state.publishing ? null : () => publishListedDesign(context, design, published),
-                            // ),
-                            // AppButton(
-                            //   label: 'Delete',
-                            //   danger: true,
-                            //   small: true,
-                            //   onPressed: () => cubit.deleteDesign(design.id),
-                            // ),
-                          ],
-                        ),
+                        if (!published)
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              AppButton(
+                                label: 'Edit',
+                                ghost: true,
+                                small: true,
+                                onPressed: () => cubit.editDesign(design.id),
+                              ),
+                            ],
+                          ),
                       ],
                     ),
                   ),
@@ -174,7 +198,7 @@ class PublishedScreen extends StatelessWidget {
                               ),
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(14),
-                                child: PosterView(design: design),
+                                child: DesignPreviewThumb(design: design),
                               ),
                             ),
                           ),

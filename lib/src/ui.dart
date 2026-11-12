@@ -136,6 +136,7 @@ class SyncedField extends StatefulWidget {
     this.hint,
     this.maxLines = 1,
     this.obscure = false,
+    this.obscureToggle = false,
     this.keyboard,
     this.live = true,
     this.textAlign = TextAlign.start,
@@ -147,6 +148,7 @@ class SyncedField extends StatefulWidget {
   final String? hint;
   final int maxLines;
   final bool obscure;
+  final bool obscureToggle;
   final TextInputType? keyboard;
   final bool live;
   final TextAlign textAlign;
@@ -158,12 +160,14 @@ class SyncedField extends StatefulWidget {
 class _SyncedFieldState extends State<SyncedField> {
   late final TextEditingController _controller;
   late final FocusNode _focus;
+  late bool _obscure;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.value);
     _focus = FocusNode()..addListener(_handleFocus);
+    _obscure = widget.obscure;
   }
 
   void _handleFocus() {
@@ -173,6 +177,9 @@ class _SyncedFieldState extends State<SyncedField> {
   @override
   void didUpdateWidget(SyncedField oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.obscure != oldWidget.obscure && !widget.obscureToggle) {
+      _obscure = widget.obscure;
+    }
     if (widget.value != _controller.text && !_focus.hasFocus) {
       _controller.value = TextEditingValue(
         text: widget.value,
@@ -195,10 +202,11 @@ class _SyncedFieldState extends State<SyncedField> {
       borderRadius: BorderRadius.circular(14),
       borderSide: BorderSide(color: colors.line),
     );
+    final canToggle = widget.obscure && widget.obscureToggle;
     return TextField(
       controller: _controller,
       focusNode: _focus,
-      obscureText: widget.obscure,
+      obscureText: _obscure,
       maxLines: widget.obscure ? 1 : widget.maxLines,
       minLines: widget.obscure ? 1 : widget.maxLines,
       textAlign: widget.textAlign,
@@ -217,6 +225,17 @@ class _SyncedFieldState extends State<SyncedField> {
         border: border,
         enabledBorder: border,
         focusedBorder: border,
+        suffixIcon: canToggle
+            ? IconButton(
+                tooltip: _obscure ? 'Show password' : 'Hide password',
+                onPressed: () => setState(() => _obscure = !_obscure),
+                icon: Icon(
+                  _obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                  color: colors.muted,
+                  size: 20,
+                ),
+              )
+            : null,
       ),
     );
   }
@@ -497,19 +516,24 @@ class StudioHeader extends StatelessWidget {
         children: [
           const LogoImage(height: 44),
           const SizedBox(width: 8),
-          const PillTag('Creator'),
+          BlocBuilder<CreatorCubit, CreatorState>(
+            buildWhen: (previous, current) => previous.user?.name != current.user?.name,
+            builder: (context, state) {
+              final name = state.user?.name.trim();
+              return PillTag((name == null || name.isEmpty) ? 'Creator' : name);
+            },
+          ),
           const Spacer(),
           SquareButton(
             onTap: () => context.read<CreatorCubit>().toggleTheme(currentlyDark: dark),
             child: Text(dark ? '☀' : '☾', style: const TextStyle(fontSize: 18)),
           ),
-          // Hidden while login is disabled — re-enable together with the login screen.
-          // const SizedBox(width: 8),
-          // SquareButton(
-          //   tooltip: 'Log out',
-          //   onTap: () => context.read<CreatorCubit>().logout(),
-          //   child: Text('⎋', style: poppins(context.colors, size: 16, height: 1)),
-          // ),
+          const SizedBox(width: 8),
+          SquareButton(
+            tooltip: 'Log out',
+            onTap: () => context.read<CreatorCubit>().logout(),
+            child: Text('⎋', style: poppins(context.colors, size: 16, height: 1)),
+          ),
         ],
       ),
     );
@@ -606,10 +630,18 @@ class FilterSwitch extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<CreatorCubit, CreatorState>(
-      buildWhen: (previous, current) => previous.filter != current.filter,
+      buildWhen: (previous, current) =>
+          previous.filter != current.filter || previous.designs != current.designs,
       builder: (context, state) {
+        final all = state.designs.length;
+        final published = state.designs.where((d) => d.status == DesignStatus.published).length;
+        final drafts = state.designs.where((d) => d.status == DesignStatus.draft).length;
         return SegmentedControl(
-          labels: const ['All', 'Published', 'Drafts'],
+          labels: [
+            'All($all)',
+            'Published($published)',
+            'Drafts($drafts)',
+          ],
           index: state.filter.index,
           onChanged: (value) => context.read<CreatorCubit>().setFilter(DesignFilter.values[value]),
         );

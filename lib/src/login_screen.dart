@@ -19,8 +19,8 @@ class LoginScreen extends StatelessWidget {
           buildWhen: (previous, current) =>
               previous.authTab != current.authTab ||
               previous.language != current.language ||
-              previous.agreed != current.agreed ||
-              previous.formTick != current.formTick,
+              previous.formTick != current.formTick ||
+              previous.authBusy != current.authBusy,
           builder: (context, state) {
             final cubit = context.read<CreatorCubit>();
             final register = state.authTab == AuthTab.register;
@@ -85,59 +85,20 @@ class LoginScreen extends StatelessWidget {
                       SyncedField(
                         key: const Key('password'),
                         value: state.password,
-                        hint: 'Password',
+                        hint: register ? 'Password (min 8 characters)' : 'Password',
                         obscure: true,
+                        obscureToggle: true,
                         onChanged: cubit.setPassword,
                       ),
-                      if (register)
-                        GestureDetector(
-                          onTap: () => cubit.setAgreed(!state.agreed),
-                          child: Padding(
-                            padding: const EdgeInsets.only(top: 12),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                  width: 18,
-                                  height: 18,
-                                  margin: const EdgeInsets.only(top: 1),
-                                  decoration: BoxDecoration(
-                                    color: state.agreed ? colors.primary : colors.card,
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(color: state.agreed ? colors.primary : colors.line),
-                                  ),
-                                  child: state.agreed
-                                      ? Icon(Icons.check, size: 14, color: colors.primaryText)
-                                      : null,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    'I will upload only original designs I have the rights to',
-                                    style: poppins(colors, size: 12, height: 1.35),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
                       const SizedBox(height: 14),
                       AppButton(
-                        label: register ? 'Create Creator Account' : 'Login',
+                        label: state.authBusy
+                            ? (register ? 'Creating account...' : 'Logging in...')
+                            : (register ? 'Create Creator Account' : 'Login'),
                         expand: true,
-                        onPressed: cubit.submitAuth,
+                        onPressed: state.authBusy ? null : cubit.submitAuth,
                       ),
-                      const SizedBox(height: 8),
-                      GestureDetector(
-                        onTap: cubit.forgotPassword,
-                        child: Padding(
-                          padding: const EdgeInsets.all(8),
-                          child: Text(
-                            'Forgot Password',
-                            style: poppins(colors, color: colors.muted),
-                          ),
-                        ),
-                      ),
+                      const SizedBox(height: 12),
                       Text(
                         'This app is only for Midas’s Touch creators.',
                         textAlign: TextAlign.center,
