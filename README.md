@@ -151,6 +151,15 @@ grant execute on function public.creator_auth_email(text) to anon, authenticated
 
 My designs shows only rows where `published_by` is the logged-in creator (published also limited to the last 1 day).
 
+## App version
+
+Bump both places before every release so you can verify mobile/web clients:
+
+- `pubspec.yaml` → `version: 1.0.1+2`
+- `lib/src/app_version.dart` → `name` / `build`
+
+The label (`v1.0.1 (2)`) shows on the login screen and studio header.
+
 ## Getting Started
 
 # web deployment 

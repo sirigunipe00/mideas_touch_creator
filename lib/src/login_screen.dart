@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:mideas_touch_creator/src/app_version.dart';
 import 'package:mideas_touch_creator/src/catalog.dart';
 import 'package:mideas_touch_creator/src/creator_cubit.dart';
 import 'package:mideas_touch_creator/src/models.dart';
@@ -101,6 +102,12 @@ class LoginScreen extends StatelessWidget {
                       const SizedBox(height: 12),
                       Text(
                         'This app is only for Midas’s Touch creators.',
+                        textAlign: TextAlign.center,
+                        style: poppins(colors, size: 11, color: colors.muted),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        AppVersion.label,
                         textAlign: TextAlign.center,
                         style: poppins(colors, size: 11, color: colors.muted),
                       ),

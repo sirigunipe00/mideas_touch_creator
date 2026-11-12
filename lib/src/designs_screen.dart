@@ -134,19 +134,26 @@ class _DesignList extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(design.savedAt, style: poppins(colors, size: 12, color: colors.muted)),
                         const SizedBox(height: 6),
-                        if (!published)
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            if (published)
+                              AppButton(
+                                label: 'View',
+                                ghost: true,
+                                small: true,
+                                onPressed: () => showPublishedDesignViewer(context, design),
+                              )
+                            else
                               AppButton(
                                 label: 'Edit',
                                 ghost: true,
                                 small: true,
                                 onPressed: () => cubit.editDesign(design.id),
                               ),
-                            ],
-                          ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
@@ -158,6 +165,90 @@ class _DesignList extends StatelessWidget {
       },
     );
   }
+}
+
+Future<void> showPublishedDesignViewer(BuildContext context, Design design) {
+  final colors = context.colors;
+  return showDialog<void>(
+    context: context,
+    builder: (dialogContext) {
+      return Dialog(
+        backgroundColor: colors.card,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        design.name,
+                        style: poppins(colors, weight: FontWeight.w600),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      icon: Icon(Icons.close, color: colors.muted),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    PillTag(design.category),
+                    const PillTag(
+                      DesignStatus.published,
+                      background: Color(0xFF1EED07),
+                      foreground: Color(0xFF0B3300),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                AspectRatio(
+                  aspectRatio: 1,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [colors.shadow],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: DesignPreviewThumb(design: design, fit: BoxFit.contain),
+                    ),
+                  ),
+                ),
+                if (design.savedAt.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    design.savedAt,
+                    style: poppins(colors, size: 12, color: colors.muted),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+                const SizedBox(height: 12),
+                AppButton(
+                  label: 'Close',
+                  ghost: true,
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class PublishedScreen extends StatelessWidget {

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:mideas_touch_creator/src/app_version.dart';
 import 'package:mideas_touch_creator/src/creator_cubit.dart';
 import 'package:mideas_touch_creator/src/models.dart';
 import 'package:mideas_touch_creator/src/theme.dart';
@@ -510,6 +511,7 @@ class StudioHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = context.isDark;
+    final colors = context.colors;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Row(
@@ -524,6 +526,8 @@ class StudioHeader extends StatelessWidget {
             },
           ),
           const Spacer(),
+          Text(AppVersion.label, style: poppins(colors, size: 10, color: colors.muted)),
+          const SizedBox(width: 8),
           SquareButton(
             onTap: () => context.read<CreatorCubit>().toggleTheme(currentlyDark: dark),
             child: Text(dark ? '☀' : '☾', style: const TextStyle(fontSize: 18)),
@@ -532,7 +536,7 @@ class StudioHeader extends StatelessWidget {
           SquareButton(
             tooltip: 'Log out',
             onTap: () => context.read<CreatorCubit>().logout(),
-            child: Text('⎋', style: poppins(context.colors, size: 16, height: 1)),
+            child: Text('⎋', style: poppins(colors, size: 16, height: 1)),
           ),
         ],
       ),
